@@ -136,8 +136,7 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let max_name_len = repos.iter().map(|r| display_width(r)).max().unwrap_or(3);
     // Width: marker(2) + name + padding(1) + borders(2)
     let popup_width = (max_name_len + 5).min(area.width as usize).max(10) as u16;
-    let popup_height =
-        (repos.len() as u16 + 2).min(area.height.saturating_sub(1)); // +2 for borders
+    let popup_height = (repos.len() as u16 + 2).min(area.height.saturating_sub(1)); // +2 for borders
 
     // Right-aligned, below filter bar
     let popup_x = area.x + area.width.saturating_sub(popup_width);
@@ -1046,7 +1045,10 @@ mod tests {
     fn render_filter_bar_includes_repo_button() {
         let state = make_state_with_groups(vec![]);
         let text = filter_bar_text(&state, 28);
-        assert!(text.contains("▼"), "filter bar should contain repo button ▼");
+        assert!(
+            text.contains("▼"),
+            "filter bar should contain repo button ▼"
+        );
     }
 
     #[test]
@@ -1054,8 +1056,14 @@ mod tests {
         let state = make_state_with_groups(vec![]);
         let (_, col) = render_filter_bar(&state, 28);
         // repo button should be near the right edge
-        assert!(col > 15, "repo button col should be right-aligned, got {col}");
-        assert!(col < 28, "repo button col should be within width, got {col}");
+        assert!(
+            col > 15,
+            "repo button col should be right-aligned, got {col}"
+        );
+        assert!(
+            col < 28,
+            "repo button col should be within width, got {col}"
+        );
     }
 
     #[test]

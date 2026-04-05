@@ -230,8 +230,7 @@ impl AppState {
     /// Only updates `last_saved_filter` on success so that a failed write
     /// does not cause `sync_global_state` to overwrite the user's choice.
     pub fn save_filter(&mut self) {
-        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.agent_filter.as_str()]).is_some()
-        {
+        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.agent_filter.as_str()]).is_some() {
             self.last_saved_filter = self.agent_filter;
         }
     }
@@ -510,9 +509,7 @@ impl AppState {
             let names = self.repo_names();
             self.repo_popup_selected = match &self.repo_filter {
                 RepoFilter::All => 0,
-                RepoFilter::Repo(name) => {
-                    names.iter().position(|n| n == name).unwrap_or(0)
-                }
+                RepoFilter::Repo(name) => names.iter().position(|n| n == name).unwrap_or(0),
             };
         }
     }

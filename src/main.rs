@@ -124,24 +124,22 @@ fn run_app(
             loop {
                 let ev = event::read()?;
                 match ev {
-                    Event::Key(key) if state.repo_popup_open => {
-                        match key.code {
-                            KeyCode::Esc => state.close_repo_popup(),
-                            KeyCode::Char('j') | KeyCode::Down => {
-                                let count = state.repo_names().len();
-                                if state.repo_popup_selected + 1 < count {
-                                    state.repo_popup_selected += 1;
-                                }
+                    Event::Key(key) if state.repo_popup_open => match key.code {
+                        KeyCode::Esc => state.close_repo_popup(),
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            let count = state.repo_names().len();
+                            if state.repo_popup_selected + 1 < count {
+                                state.repo_popup_selected += 1;
                             }
-                            KeyCode::Char('k') | KeyCode::Up => {
-                                if state.repo_popup_selected > 0 {
-                                    state.repo_popup_selected -= 1;
-                                }
-                            }
-                            KeyCode::Enter => state.confirm_repo_popup(),
-                            _ => {}
                         }
-                    }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            if state.repo_popup_selected > 0 {
+                                state.repo_popup_selected -= 1;
+                            }
+                        }
+                        KeyCode::Enter => state.confirm_repo_popup(),
+                        _ => {}
+                    },
                     Event::Key(key) => match key.code {
                         KeyCode::Esc => {
                             if state.focus == Focus::ActivityLog || state.focus == Focus::Filter {
