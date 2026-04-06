@@ -134,11 +134,22 @@ fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inner: Rect) {
     frame.render_widget(paragraph, inner);
 }
 
+/// Info about a PR link position within the header (relative to header origin).
+struct PrLinkInfo {
+    /// X offset from the left edge of the header area.
+    x_offset: u16,
+    /// Display text (e.g. "#123").
+    text: String,
+    /// Full URL to open.
+    url: String,
+}
+
 /// Render the fixed header: branch+PR line, diff summary line, separator.
-/// Returns the lines and the number of rows consumed.
-fn render_git_header(state: &AppState, inner_w: usize) -> Vec<Line<'static>> {
+/// Returns the lines and optional PR link position info.
+fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, Option<PrLinkInfo>) {
     let theme = &state.theme;
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut pr_link_info: Option<PrLinkInfo> = None;
 
     // Line 1: branch (left) + PR number (right)
     if !state.git.branch.is_empty() {
@@ -173,6 +184,7 @@ fn render_git_header(state: &AppState, inner_w: usize) -> Vec<Line<'static>> {
 
         if let Some(ref pr) = pr_text {
             let gap = pad_to(branch_w + pr_w, inner_w);
+            let pr_x_offset = (inner_w - pr_w) as u16;
             left_spans.push(Span::raw(gap));
             left_spans.push(Span::styled(
                 pr.clone(),
@@ -181,6 +193,17 @@ fn render_git_header(state: &AppState, inner_w: usize) -> Vec<Line<'static>> {
                     .add_modifier(Modifier::UNDERLINED),
             ));
             left_spans.push(Span::raw(" "));
+
+            // Build PR URL from remote_url
+            if !state.git.remote_url.is_empty() {
+                if let Some(num) = &state.git.pr_number {
+                    pr_link_info = Some(PrLinkInfo {
+                        x_offset: pr_x_offset,
+                        text: pr.clone(),
+                        url: format!("{}/pull/{num}", state.git.remote_url),
+                    });
+                }
+            }
         }
 
         lines.push(Line::from(left_spans));
@@ -230,7 +253,7 @@ fn render_git_header(state: &AppState, inner_w: usize) -> Vec<Line<'static>> {
         Style::default().fg(theme.text_muted),
     )));
 
-    lines
+    (lines, pr_link_info)
 }
 
 /// Render a single file section (Staged/Unstaged/Untracked).
@@ -375,7 +398,7 @@ fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: Rect) {
     }
 
     // Render fixed header
-    let header_lines = render_git_header(state, inner_w);
+    let (header_lines, pr_link) = render_git_header(state, inner_w);
     let header_height = header_lines.len() as u16;
 
     // Render header in a fixed area at the top
@@ -387,6 +410,18 @@ fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: Rect) {
     };
     let header_paragraph = Paragraph::new(header_lines);
     frame.render_widget(header_paragraph, header_area);
+
+    // Store PR hyperlink overlay for OSC 8 post-render
+    if let Some(info) = pr_link {
+        state
+            .hyperlink_overlays
+            .push(crate::state::HyperlinkOverlay {
+                x: inner.x + info.x_offset,
+                y: inner.y,
+                text: info.text,
+                url: info.url,
+            });
+    }
 
     // Remaining area for scrollable file list
     let content_y = inner.y + header_height;
@@ -474,11 +509,58 @@ mod tests {
         let mut state = crate::state::AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.pr_number = Some("5".into());
-        let lines = render_git_header(&state, 30);
+        let (lines, _) = render_git_header(&state, 30);
         let spans = &lines[0].spans;
         let pr_span = spans.iter().find(|s| s.content.contains('#')).unwrap();
         assert_eq!(pr_span.content.as_ref(), "#5");
         assert!(pr_span.style.add_modifier.contains(Modifier::UNDERLINED));
+    }
+
+    // ─── PR hyperlink overlay tests ────────────────────────────────
+
+    #[test]
+    fn pr_link_info_has_correct_url() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.pr_number = Some("42".into());
+        state.git.remote_url = "https://github.com/user/repo".into();
+        let (_, pr_link) = render_git_header(&state, 30);
+        let info = pr_link.expect("pr_link should be Some");
+        assert_eq!(info.url, "https://github.com/user/repo/pull/42");
+        assert_eq!(info.text, "#42");
+    }
+
+    #[test]
+    fn pr_link_info_none_without_remote_url() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.pr_number = Some("10".into());
+        // remote_url is empty by default
+        let (_, pr_link) = render_git_header(&state, 30);
+        assert!(pr_link.is_none());
+    }
+
+    #[test]
+    fn pr_link_info_none_without_pr_number() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.remote_url = "https://github.com/user/repo".into();
+        let (_, pr_link) = render_git_header(&state, 30);
+        assert!(pr_link.is_none());
+    }
+
+    #[test]
+    fn pr_link_x_offset_right_aligned() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.pr_number = Some("7".into());
+        state.git.remote_url = "https://github.com/user/repo".into();
+        let width = 30;
+        let (_, pr_link) = render_git_header(&state, width);
+        let info = pr_link.unwrap();
+        // PR text "#7" is 2 chars wide + 1 trailing space = 3, so x_offset = 30 - 3 = 27
+        let pr_display_w = display_width(&info.text) + 1; // +1 for trailing space
+        assert_eq!(info.x_offset as usize, width - pr_display_w);
     }
 
     // ─── Section title color tests ───────────────────────────────
@@ -526,7 +608,7 @@ mod tests {
         let mut state = crate::state::AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.diff_stat = Some((1, 0));
-        let lines = render_git_header(&state, 40);
+        let (lines, _) = render_git_header(&state, 40);
         assert_eq!(lines.len(), 4);
         assert!(line_text(&lines[1]).is_empty());
     }
@@ -535,7 +617,7 @@ mod tests {
     fn header_no_blank_line_without_changes() {
         let mut state = crate::state::AppState::new(String::new());
         state.git.branch = "main".into();
-        let lines = render_git_header(&state, 40);
+        let (lines, _) = render_git_header(&state, 40);
         assert_eq!(lines.len(), 2);
     }
 
@@ -587,7 +669,7 @@ mod tests {
         state.git.branch = "feature/branch".into();
         state.git.pr_number = Some("1".into());
         state.git.diff_stat = Some((999, 888));
-        let lines = render_git_header(&state, 20);
+        let (lines, _) = render_git_header(&state, 20);
         for line in &lines {
             let text = line_text(line);
             assert!(

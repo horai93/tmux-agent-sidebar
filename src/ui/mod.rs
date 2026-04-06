@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod bottom;
+pub mod cat;
 pub mod colors;
 pub mod text;
 
@@ -15,6 +16,7 @@ pub const BOTTOM_PANEL_HEIGHT: u16 = 20;
 // ── public entry point ──────────────────────────────────────────────
 
 pub fn draw(frame: &mut Frame, state: &mut AppState) {
+    state.hyperlink_overlays.clear();
     let area = frame.area();
 
     let bot_h = BOTTOM_PANEL_HEIGHT;

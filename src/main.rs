@@ -1,9 +1,10 @@
-use std::io;
+use std::io::{self, Write as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
+    cursor::MoveTo,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseButton, MouseEventKind,
     },
@@ -13,7 +14,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tmux_agent_sidebar::SPINNER_PULSE;
 use tmux_agent_sidebar::git::{self, GitData};
-use tmux_agent_sidebar::state::{AppState, BottomTab, Focus};
+use tmux_agent_sidebar::state::{AppState, BottomTab, Focus, HyperlinkOverlay};
 use tmux_agent_sidebar::tmux;
 use tmux_agent_sidebar::ui;
 
@@ -117,6 +118,9 @@ fn run_app(
 
     loop {
         terminal.draw(|frame| ui::draw(frame, &mut state))?;
+
+        // Write OSC 8 hyperlink overlays after frame render
+        write_hyperlink_overlays(terminal.backend_mut(), &state.hyperlink_overlays)?;
 
         let refresh_timeout = refresh_interval.saturating_sub(last_refresh.elapsed());
         let spinner_timeout = spinner_interval.saturating_sub(last_spinner.elapsed());
@@ -285,6 +289,24 @@ fn run_app(
             state.apply_git_data(data);
         }
     }
+}
+
+/// Write OSC 8 hyperlink escape sequences over already-rendered PR text.
+fn write_hyperlink_overlays(
+    backend: &mut CrosstermBackend<io::Stdout>,
+    overlays: &[HyperlinkOverlay],
+) -> io::Result<()> {
+    for overlay in overlays {
+        execute!(backend, MoveTo(overlay.x, overlay.y))?;
+        // OSC 8: open hyperlink
+        write!(backend, "\x1b]8;;{}\x1b\\", overlay.url)?;
+        // Re-write the text so the terminal associates these cells with the link
+        write!(backend, "{}", overlay.text)?;
+        // OSC 8: close hyperlink
+        write!(backend, "\x1b]8;;\x1b\\")?;
+        backend.flush()?;
+    }
+    Ok(())
 }
 
 /// Git data polling thread. Fetches git status every 2 seconds while the Git

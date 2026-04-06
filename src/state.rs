@@ -275,6 +275,17 @@ pub struct AppState {
     pub cat_bob_timer: usize,
     /// Shared state across sidebar instances, persisted to tmux global variables.
     pub global: GlobalState,
+    /// Hyperlink overlays to be written after frame render (OSC 8).
+    pub hyperlink_overlays: Vec<HyperlinkOverlay>,
+}
+
+/// Screen-positioned hyperlink overlay for OSC 8 terminal hyperlinks.
+#[derive(Debug, Clone)]
+pub struct HyperlinkOverlay {
+    pub x: u16,
+    pub y: u16,
+    pub text: String,
+    pub url: String,
 }
 
 impl AppState {
@@ -314,6 +325,7 @@ impl AppState {
             cat_frame: 0,
             cat_bob_timer: 0,
             global: GlobalState::new(),
+            hyperlink_overlays: vec![],
         }
     }
 
@@ -570,12 +582,16 @@ impl AppState {
 
     /// Advance cat animation state. Called every spinner tick (200ms).
     pub fn tick_cat(&mut self, panel_width: u16) {
-        let running_count = self.repo_groups.iter().flat_map(|g| &g.panes)
+        let running_count = self
+            .repo_groups
+            .iter()
+            .flat_map(|g| &g.panes)
             .filter(|(p, _)| p.status == crate::tmux::PaneStatus::Running)
             .count();
 
-        let desk_x = panel_width
-            .saturating_sub(crate::ui::cat::DESK_OFFSET + crate::ui::cat::DESK_WIDTH + crate::ui::cat::CAT_WIDTH);
+        let desk_x = panel_width.saturating_sub(
+            crate::ui::cat::DESK_OFFSET + crate::ui::cat::DESK_WIDTH + crate::ui::cat::CAT_WIDTH,
+        );
 
         match self.cat_state {
             crate::ui::cat::CatState::Idle => {
@@ -2177,7 +2193,10 @@ mod tests {
             panes: vec![(pane, PaneGitInfo::default())],
         }];
         state.tick_cat(60);
-        assert!(matches!(state.cat_state, crate::ui::cat::CatState::WalkRight));
+        assert!(matches!(
+            state.cat_state,
+            crate::ui::cat::CatState::WalkRight
+        ));
         assert!(state.cat_x > crate::ui::cat::CAT_HOME_X);
     }
 
@@ -2192,8 +2211,9 @@ mod tests {
             panes: vec![(pane, PaneGitInfo::default())],
         }];
         let panel_width = 60u16;
-        let desk_x = panel_width
-            .saturating_sub(crate::ui::cat::DESK_OFFSET + crate::ui::cat::DESK_WIDTH + crate::ui::cat::CAT_WIDTH);
+        let desk_x = panel_width.saturating_sub(
+            crate::ui::cat::DESK_OFFSET + crate::ui::cat::DESK_WIDTH + crate::ui::cat::CAT_WIDTH,
+        );
         state.cat_state = crate::ui::cat::CatState::WalkRight;
         state.cat_x = desk_x - 1;
         state.tick_cat(panel_width);
@@ -2213,7 +2233,10 @@ mod tests {
         state.cat_state = crate::ui::cat::CatState::Working;
         state.cat_x = 40;
         state.tick_cat(60);
-        assert!(matches!(state.cat_state, crate::ui::cat::CatState::WalkLeft));
+        assert!(matches!(
+            state.cat_state,
+            crate::ui::cat::CatState::WalkLeft
+        ));
     }
 
     #[test]
