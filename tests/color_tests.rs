@@ -623,7 +623,7 @@ fn test_selection_bg_color_applied() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
     state.rebuild_row_targets();
     state.sidebar_focused = true;
-    state.selected_agent_row = 0;
+    state.global.selected_agent_row = 0;
 
     let styled = render_to_styled_string(&mut state, 28, 24);
     // selection_bg is 239

@@ -54,7 +54,7 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
             current_width += 2;
         }
 
-        let is_selected = state.agent_filter == filter;
+        let is_selected = state.global.agent_filter == filter;
 
         if let Some((icon, icon_color)) = icon_info {
             let mut icon_style = if is_selected || count > 0 {
@@ -95,7 +95,7 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
 
     // Repo filter button — right-aligned
     let repo_icon = "▼";
-    let repo_label = match &state.repo_filter {
+    let repo_label = match &state.global.repo_filter {
         RepoFilter::All => repo_icon.to_string(),
         RepoFilter::Repo(name) => {
             let max_w = 8;
@@ -109,7 +109,7 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
 
     spans.push(Span::raw(" ".repeat(gap)));
 
-    let repo_has_filter = !matches!(state.repo_filter, RepoFilter::All);
+    let repo_has_filter = !matches!(state.global.repo_filter, RepoFilter::All);
     let repo_style = if state.repo_popup_open {
         Style::default()
             .fg(theme.text_active)
@@ -160,7 +160,7 @@ fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
         }
 
         let is_highlighted = i == state.repo_popup_selected;
-        let is_current = match &state.repo_filter {
+        let is_current = match &state.global.repo_filter {
             RepoFilter::All => i == 0,
             RepoFilter::Repo(n) => *n == *name,
         };
@@ -222,10 +222,10 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let mut line_to_row: Vec<Option<usize>> = Vec::new();
     let mut row_index: usize = 0;
 
-    let filter = state.agent_filter;
+    let filter = state.global.agent_filter;
 
     for group in &state.repo_groups {
-        if !state.repo_filter.matches_group(&group.name) {
+        if !state.global.repo_filter.matches_group(&group.name) {
             continue;
         }
         let filtered_panes: Vec<_> = group
@@ -279,7 +279,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
             let is_selected = state.sidebar_focused
                 && state.focus == Focus::Agents
-                && row_index == state.selected_agent_row;
+                && row_index == state.global.selected_agent_row;
 
             let is_active = state
                 .focused_pane_id
@@ -325,7 +325,7 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
         let mut first_line: Option<usize> = None;
         let mut last_line: Option<usize> = None;
         for (i, mapping) in state.line_to_row.iter().enumerate() {
-            if *mapping == Some(state.selected_agent_row) {
+            if *mapping == Some(state.global.selected_agent_row) {
                 if first_line.is_none() {
                     first_line = Some(i);
                 }
@@ -1073,7 +1073,7 @@ mod tests {
             has_focus: true,
             panes: vec![],
         }]);
-        state.repo_filter = RepoFilter::Repo("my-app".into());
+        state.global.repo_filter = RepoFilter::Repo("my-app".into());
         let text = filter_bar_text(&state, 40);
         assert!(
             text.contains("my-app"),
@@ -1088,7 +1088,7 @@ mod tests {
             has_focus: true,
             panes: vec![],
         }]);
-        state.repo_filter = RepoFilter::Repo("very-long-repository-name".into());
+        state.global.repo_filter = RepoFilter::Repo("very-long-repository-name".into());
         let text = filter_bar_text(&state, 28);
         // Should be truncated, not the full name
         assert!(

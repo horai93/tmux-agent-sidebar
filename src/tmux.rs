@@ -370,28 +370,29 @@ fn split_tmux_fields(line: &str, delimiter: char) -> Vec<String> {
     fields
 }
 
-pub fn get_sidebar_pane_info(tmux_pane: &str) -> (bool, u16, u16) {
+pub fn get_sidebar_pane_info(tmux_pane: &str) -> (bool, bool, u16, u16) {
     let output = run_tmux(&[
         "display-message",
         "-t",
         tmux_pane,
         "-p",
-        "#{pane_active} #{pane_width} #{pane_height}",
+        "#{pane_active} #{window_active} #{pane_width} #{pane_height}",
     ]);
     match output {
         Some(s) => {
-            let parts: Vec<&str> = s.trim().splitn(3, ' ').collect();
-            if parts.len() >= 3 {
+            let parts: Vec<&str> = s.trim().splitn(4, ' ').collect();
+            if parts.len() >= 4 {
                 (
                     parts[0] == "1",
-                    parts[1].parse().unwrap_or(28),
-                    parts[2].parse().unwrap_or(24),
+                    parts[1] == "1",
+                    parts[2].parse().unwrap_or(28),
+                    parts[3].parse().unwrap_or(24),
                 )
             } else {
-                (false, 28, 24)
+                (false, false, 28, 24)
             }
         }
-        None => (false, 28, 24),
+        None => (false, false, 28, 24),
     }
 }
 

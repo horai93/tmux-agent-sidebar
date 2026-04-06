@@ -136,105 +136,38 @@ impl ScrollState {
     }
 }
 
-pub struct AppState {
-    pub now: u64,
-    pub sessions: Vec<SessionInfo>,
-    pub repo_groups: Vec<crate::group::RepoGroup>,
-    pub sidebar_focused: bool,
-    pub focus: Focus,
-    pub spinner_frame: usize,
-    pub selected_agent_row: usize,
-    pub agent_row_targets: Vec<RowTarget>,
-    pub activity_entries: Vec<ActivityEntry>,
-    pub activity_scroll: ScrollState,
-    pub focused_pane_id: Option<String>,
-    pub tmux_pane: String,
-    pub activity_max_entries: usize,
-    pub line_to_row: Vec<Option<usize>>,
-    pub agents_scroll: ScrollState,
-    pub theme: ColorTheme,
-    pub bottom_tab: BottomTab,
-    pub git: crate::git::GitData,
-    pub git_scroll: ScrollState,
-    pub pane_task_progress: HashMap<String, TaskProgress>,
-    pub pane_task_dismissed: HashMap<String, usize>,
-    /// Tracks when each pane first became inactive (epoch seconds).
-    /// Used to debounce task progress dismissal — the agent status can
-    /// briefly flicker to idle (e.g. during system prompt delivery),
-    /// so we wait a grace period before actually hiding task progress.
-    pub pane_inactive_since: HashMap<String, u64>,
-    /// Agent pane IDs that have already been seen. Used to detect new agent
-    /// launches and auto-switch the bottom tab to Activity only once.
-    pub seen_agent_panes: std::collections::HashSet<String>,
-    /// Per-pane bottom tab preference. Saved when focus leaves a pane,
-    /// restored when focus returns.
-    pub pane_tab_prefs: HashMap<String, BottomTab>,
-    /// Previous focused pane ID, used to detect focus changes.
-    pub prev_focused_pane_id: Option<String>,
+/// State shared across all sidebar instances via tmux global variables.
+/// Synced from tmux at startup and on pane focus change (SIGUSR1).
+pub struct GlobalState {
     pub agent_filter: AgentFilter,
-    /// Last filter value successfully written to tmux. Used at startup to
-    /// detect whether the tmux variable differs from the initial default.
-    last_saved_filter: AgentFilter,
-    /// Last time a mouse click was processed on the filter bar (for debounce).
-    pub last_filter_click: std::time::Instant,
+    pub selected_agent_row: usize,
     pub repo_filter: RepoFilter,
-    /// Last repo filter value successfully written to tmux. Used to detect
-    /// external changes (from another sidebar instance) vs failed local writes.
-    last_saved_repo_filter: RepoFilter,
-    pub repo_popup_open: bool,
-    pub repo_popup_selected: usize,
-    pub repo_popup_area: Option<ratatui::layout::Rect>,
-    pub repo_button_col: u16,
+    /// Last filter value successfully written to tmux.
+    last_saved_filter: AgentFilter,
     /// Last cursor value successfully written to tmux.
     last_saved_cursor: usize,
+    /// Last repo filter value successfully written to tmux.
+    last_saved_repo_filter: RepoFilter,
 }
 
-impl AppState {
-    pub fn new(tmux_pane: String) -> Self {
+impl GlobalState {
+    pub fn new() -> Self {
         Self {
-            now: 0,
-            sessions: vec![],
-            repo_groups: vec![],
-            sidebar_focused: false,
-            focus: Focus::Agents,
-            spinner_frame: 0,
-            selected_agent_row: 0,
-            agent_row_targets: vec![],
-            activity_entries: vec![],
-            activity_scroll: ScrollState::default(),
-            focused_pane_id: None,
-            tmux_pane,
-            activity_max_entries: 50,
-            line_to_row: vec![],
-            agents_scroll: ScrollState::default(),
-            theme: ColorTheme::default(),
-            bottom_tab: BottomTab::Activity,
-            git: crate::git::GitData::default(),
-            git_scroll: ScrollState::default(),
-            pane_task_progress: HashMap::new(),
-            pane_task_dismissed: HashMap::new(),
-            pane_inactive_since: HashMap::new(),
-            seen_agent_panes: std::collections::HashSet::new(),
-            pane_tab_prefs: HashMap::new(),
-            prev_focused_pane_id: None,
             agent_filter: AgentFilter::All,
-            last_saved_filter: AgentFilter::All,
-            last_filter_click: std::time::Instant::now(),
+            selected_agent_row: 0,
             repo_filter: RepoFilter::All,
-            last_saved_repo_filter: RepoFilter::All,
-            repo_popup_open: false,
-            repo_popup_selected: 0,
-            repo_popup_area: None,
-            repo_button_col: u16::MAX,
+            last_saved_filter: AgentFilter::All,
             last_saved_cursor: 0,
+            last_saved_repo_filter: RepoFilter::All,
         }
     }
 
     /// Save filter to tmux global variable.
     /// Only updates `last_saved_filter` on success so that a failed write
-    /// does not cause `sync_global_state` to overwrite the user's choice.
+    /// does not cause sync to overwrite the user's choice.
     pub fn save_filter(&mut self) {
-        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.agent_filter.as_str()]).is_some() {
+        if tmux::run_tmux(&["set", "-g", "@sidebar_filter", self.agent_filter.as_str()]).is_some()
+        {
             self.last_saved_filter = self.agent_filter;
         }
     }
@@ -253,23 +186,29 @@ impl AppState {
         }
     }
 
-    /// Load saved state from tmux global variables at startup.
-    /// Restores filter, cursor, and repo filter from the previous session.
-    pub fn load_initial_global_state(&mut self) {
-        let opts = tmux::get_all_global_options();
-        self.apply_startup_options(&opts);
+    /// Save repo filter to tmux global variable.
+    pub fn save_repo_filter(&mut self) {
+        if tmux::run_tmux(&[
+            "set",
+            "-g",
+            "@sidebar_repo_filter",
+            self.repo_filter.as_str(),
+        ])
+        .is_some()
+        {
+            self.last_saved_repo_filter = self.repo_filter.clone();
+        }
     }
 
-    /// Periodic sync: only syncs repo filter from tmux global variables.
-    pub fn sync_global_state(&mut self) {
+    /// Load all global state from tmux variables.
+    /// Called at startup and on SIGUSR1 (pane focus change).
+    pub fn load_from_tmux(&mut self) {
         let opts = tmux::get_all_global_options();
-        self.apply_global_options(&opts);
+        self.apply_all(&opts);
     }
 
-    /// Apply startup options from tmux global variables.
-    /// Reads filter, cursor, and repo filter from tmux.
-    /// Called only once at startup to restore saved state.
-    pub fn apply_startup_options(&mut self, opts: &HashMap<String, String>) {
+    /// Apply all global options from tmux (filter, cursor, repo filter).
+    pub fn apply_all(&mut self, opts: &HashMap<String, String>) {
         if let Some(filter_str) = opts.get("@sidebar_filter") {
             let tmux_filter = AgentFilter::from_str(filter_str);
             if tmux_filter != self.last_saved_filter {
@@ -292,45 +231,108 @@ impl AppState {
             }
         }
     }
+}
 
-    /// Apply periodic tmux global options. Only syncs repo filter.
-    /// Filter and cursor are local-only after startup to prevent
-    /// unexpected overwrites during hook-heavy periods (e.g. task completion).
-    pub fn apply_global_options(&mut self, opts: &HashMap<String, String>) {
-        if let Some(repo_str) = opts.get("@sidebar_repo_filter") {
-            let tmux_repo = RepoFilter::from_str(repo_str);
-            if tmux_repo != self.last_saved_repo_filter {
-                self.repo_filter = tmux_repo.clone();
-                self.last_saved_repo_filter = tmux_repo;
-            }
+pub struct AppState {
+    pub now: u64,
+    pub sessions: Vec<SessionInfo>,
+    pub repo_groups: Vec<crate::group::RepoGroup>,
+    pub sidebar_focused: bool,
+    pub focus: Focus,
+    pub spinner_frame: usize,
+    pub agent_row_targets: Vec<RowTarget>,
+    pub activity_entries: Vec<ActivityEntry>,
+    pub activity_scroll: ScrollState,
+    pub focused_pane_id: Option<String>,
+    pub tmux_pane: String,
+    pub activity_max_entries: usize,
+    pub line_to_row: Vec<Option<usize>>,
+    pub agents_scroll: ScrollState,
+    pub theme: ColorTheme,
+    pub bottom_tab: BottomTab,
+    pub git: crate::git::GitData,
+    pub git_scroll: ScrollState,
+    pub pane_task_progress: HashMap<String, TaskProgress>,
+    pub pane_task_dismissed: HashMap<String, usize>,
+    /// Tracks when each pane first became inactive (epoch seconds).
+    pub pane_inactive_since: HashMap<String, u64>,
+    /// Agent pane IDs that have already been seen.
+    pub seen_agent_panes: std::collections::HashSet<String>,
+    /// Per-pane bottom tab preference.
+    pub pane_tab_prefs: HashMap<String, BottomTab>,
+    /// Previous focused pane ID, used to detect focus changes.
+    pub prev_focused_pane_id: Option<String>,
+    /// Last time a mouse click was processed on the filter bar (for debounce).
+    pub last_filter_click: std::time::Instant,
+    pub repo_popup_open: bool,
+    pub repo_popup_selected: usize,
+    pub repo_popup_area: Option<ratatui::layout::Rect>,
+    pub repo_button_col: u16,
+    /// Shared state across sidebar instances, persisted to tmux global variables.
+    pub global: GlobalState,
+}
+
+impl AppState {
+    pub fn new(tmux_pane: String) -> Self {
+        Self {
+            now: 0,
+            sessions: vec![],
+            repo_groups: vec![],
+            sidebar_focused: false,
+            focus: Focus::Agents,
+            spinner_frame: 0,
+            agent_row_targets: vec![],
+            activity_entries: vec![],
+            activity_scroll: ScrollState::default(),
+            focused_pane_id: None,
+            tmux_pane,
+            activity_max_entries: 50,
+            line_to_row: vec![],
+            agents_scroll: ScrollState::default(),
+            theme: ColorTheme::default(),
+            bottom_tab: BottomTab::Activity,
+            git: crate::git::GitData::default(),
+            git_scroll: ScrollState::default(),
+            pane_task_progress: HashMap::new(),
+            pane_task_dismissed: HashMap::new(),
+            pane_inactive_since: HashMap::new(),
+            seen_agent_panes: std::collections::HashSet::new(),
+            pane_tab_prefs: HashMap::new(),
+            prev_focused_pane_id: None,
+            last_filter_click: std::time::Instant::now(),
+            repo_popup_open: false,
+            repo_popup_selected: 0,
+            repo_popup_area: None,
+            repo_button_col: u16::MAX,
+            global: GlobalState::new(),
         }
     }
 
     pub fn rebuild_row_targets(&mut self) {
         // Reset stale repo filter if the repo no longer exists
-        if let RepoFilter::Repo(ref name) = self.repo_filter {
+        if let RepoFilter::Repo(ref name) = self.global.repo_filter {
             if !self.repo_groups.iter().any(|g| g.name == *name) {
-                self.repo_filter = RepoFilter::All;
+                self.global.repo_filter = RepoFilter::All;
             }
         }
 
         self.agent_row_targets.clear();
         for group in &self.repo_groups {
-            if !self.repo_filter.matches_group(&group.name) {
+            if !self.global.repo_filter.matches_group(&group.name) {
                 continue;
             }
             for (pane, _) in &group.panes {
-                if self.agent_filter.matches(&pane.status) {
+                if self.global.agent_filter.matches(&pane.status) {
                     self.agent_row_targets.push(RowTarget {
                         pane_id: pane.pane_id.clone(),
                     });
                 }
             }
         }
-        if self.selected_agent_row >= self.agent_row_targets.len()
+        if self.global.selected_agent_row >= self.agent_row_targets.len()
             && !self.agent_row_targets.is_empty()
         {
-            self.selected_agent_row = self.agent_row_targets.len() - 1;
+            self.global.selected_agent_row = self.agent_row_targets.len() - 1;
         }
     }
 
@@ -351,9 +353,9 @@ impl AppState {
             return false;
         }
         let len = self.agent_row_targets.len() as isize;
-        let next = self.selected_agent_row as isize + delta;
+        let next = self.global.selected_agent_row as isize + delta;
         if next >= 0 && next < len {
-            self.selected_agent_row = next as usize;
+            self.global.selected_agent_row = next as usize;
             true
         } else {
             false
@@ -361,7 +363,7 @@ impl AppState {
     }
 
     pub fn activate_selection(&self) {
-        if let Some(target) = self.agent_row_targets.get(self.selected_agent_row) {
+        if let Some(target) = self.agent_row_targets.get(self.global.selected_agent_row) {
             tmux::select_pane(&target.pane_id);
         }
     }
@@ -445,8 +447,8 @@ impl AppState {
                 x += 2; // "  " separator
             }
             if col >= x && col < x + width {
-                self.agent_filter = *filter;
-                self.save_filter();
+                self.global.agent_filter = *filter;
+                self.global.save_filter();
                 self.rebuild_row_targets();
                 return;
             }
@@ -487,8 +489,8 @@ impl AppState {
         }
         let line_index = (row as usize - 1) + self.agents_scroll.offset;
         if let Some(Some(agent_row)) = self.line_to_row.get(line_index) {
-            self.selected_agent_row = *agent_row;
-            self.save_cursor();
+            self.global.selected_agent_row = *agent_row;
+            self.global.save_cursor();
             self.activate_selection();
         }
     }
@@ -497,7 +499,7 @@ impl AppState {
     pub fn status_counts(&self) -> (usize, usize, usize, usize, usize) {
         let (mut running, mut waiting, mut idle, mut error) = (0, 0, 0, 0);
         for group in &self.repo_groups {
-            if !self.repo_filter.matches_group(&group.name) {
+            if !self.global.repo_filter.matches_group(&group.name) {
                 continue;
             }
             for (pane, _) in &group.panes {
@@ -527,26 +529,12 @@ impl AppState {
         names
     }
 
-    /// Save repo filter to tmux global variable.
-    pub fn save_repo_filter(&mut self) {
-        if tmux::run_tmux(&[
-            "set",
-            "-g",
-            "@sidebar_repo_filter",
-            self.repo_filter.as_str(),
-        ])
-        .is_some()
-        {
-            self.last_saved_repo_filter = self.repo_filter.clone();
-        }
-    }
-
     pub fn toggle_repo_popup(&mut self) {
         self.repo_popup_open = !self.repo_popup_open;
         if self.repo_popup_open {
             // Set selected to current filter position
             let names = self.repo_names();
-            self.repo_popup_selected = match &self.repo_filter {
+            self.repo_popup_selected = match &self.global.repo_filter {
                 RepoFilter::All => 0,
                 RepoFilter::Repo(name) => names.iter().position(|n| n == name).unwrap_or(0),
             };
@@ -556,14 +544,14 @@ impl AppState {
     pub fn confirm_repo_popup(&mut self) {
         let names = self.repo_names();
         if let Some(name) = names.get(self.repo_popup_selected) {
-            self.repo_filter = if self.repo_popup_selected == 0 {
+            self.global.repo_filter = if self.repo_popup_selected == 0 {
                 RepoFilter::All
             } else {
                 RepoFilter::Repo(name.clone())
             };
         }
         self.repo_popup_open = false;
-        self.save_repo_filter();
+        self.global.save_repo_filter();
         self.rebuild_row_targets();
     }
 
@@ -653,12 +641,12 @@ mod tests {
         state.rebuild_row_targets();
 
         // Start at first group
-        assert_eq!(state.selected_agent_row, 0);
+        assert_eq!(state.global.selected_agent_row, 0);
         assert_eq!(state.agent_row_targets[0].pane_id, "%1");
 
         // Move to second group
         assert!(state.move_agent_selection(1));
-        assert_eq!(state.selected_agent_row, 1);
+        assert_eq!(state.global.selected_agent_row, 1);
         assert_eq!(state.agent_row_targets[1].pane_id, "%5");
     }
 
@@ -1250,7 +1238,7 @@ mod tests {
     #[test]
     fn apply_session_snapshot_rebuilds_derived_state() {
         let mut state = AppState::new("%99".into());
-        state.selected_agent_row = 3;
+        state.global.selected_agent_row = 3;
 
         let pane = test_pane("%1");
         let sessions = vec![SessionInfo {
@@ -1270,7 +1258,7 @@ mod tests {
         assert_eq!(state.sessions.len(), 1);
         assert_eq!(state.repo_groups.len(), 1);
         assert_eq!(state.agent_row_targets.len(), 1);
-        assert_eq!(state.selected_agent_row, 0);
+        assert_eq!(state.global.selected_agent_row, 0);
         // focused_pane_id is set by find_focused_pane() which queries tmux
         // directly, so we don't assert it here (tmux not available in tests).
     }
@@ -1417,12 +1405,12 @@ mod tests {
                 pane_id: "%3".into(),
             },
         ];
-        state.selected_agent_row = 0;
+        state.global.selected_agent_row = 0;
 
         assert!(!state.move_agent_selection(-1), "can't go below 0");
         assert!(state.move_agent_selection(1));
         assert!(state.move_agent_selection(1));
-        assert_eq!(state.selected_agent_row, 2);
+        assert_eq!(state.global.selected_agent_row, 2);
         assert!(!state.move_agent_selection(1), "can't go past end");
     }
 
@@ -1440,15 +1428,15 @@ mod tests {
                 (test_pane("%3"), PaneGitInfo::default()),
             ],
         }];
-        state.selected_agent_row = 2;
+        state.global.selected_agent_row = 2;
         state.rebuild_row_targets();
-        assert_eq!(state.selected_agent_row, 2);
+        assert_eq!(state.global.selected_agent_row, 2);
 
         // Shrink to 1 pane
         state.repo_groups[0].panes = vec![(test_pane("%1"), PaneGitInfo::default())];
         state.rebuild_row_targets();
         assert_eq!(
-            state.selected_agent_row, 0,
+            state.global.selected_agent_row, 0,
             "should clamp to last valid index"
         );
     }
@@ -1456,12 +1444,12 @@ mod tests {
     #[test]
     fn rebuild_row_targets_empty_groups() {
         let mut state = AppState::new("%99".into());
-        state.selected_agent_row = 5;
+        state.global.selected_agent_row = 5;
         state.repo_groups = vec![];
         state.rebuild_row_targets();
         assert!(state.agent_row_targets.is_empty());
         // selected_agent_row stays as-is when targets empty (no clamp needed)
-        assert_eq!(state.selected_agent_row, 5);
+        assert_eq!(state.global.selected_agent_row, 5);
     }
 
     #[test]
@@ -1485,25 +1473,25 @@ mod tests {
         }];
 
         // All filter: all 3 panes
-        state.agent_filter = AgentFilter::All;
+        state.global.agent_filter = AgentFilter::All;
         state.rebuild_row_targets();
         assert_eq!(state.agent_row_targets.len(), 3);
 
         // Running filter: only 2 panes
-        state.agent_filter = AgentFilter::Running;
+        state.global.agent_filter = AgentFilter::Running;
         state.rebuild_row_targets();
         assert_eq!(state.agent_row_targets.len(), 2);
         assert_eq!(state.agent_row_targets[0].pane_id, "%1");
         assert_eq!(state.agent_row_targets[1].pane_id, "%3");
 
         // Idle filter: only 1 pane
-        state.agent_filter = AgentFilter::Idle;
+        state.global.agent_filter = AgentFilter::Idle;
         state.rebuild_row_targets();
         assert_eq!(state.agent_row_targets.len(), 1);
         assert_eq!(state.agent_row_targets[0].pane_id, "%2");
 
         // Error filter: no panes
-        state.agent_filter = AgentFilter::Error;
+        state.global.agent_filter = AgentFilter::Error;
         state.rebuild_row_targets();
         assert!(state.agent_row_targets.is_empty());
     }
@@ -1529,14 +1517,14 @@ mod tests {
         }];
 
         // Select last agent in All view
-        state.agent_filter = AgentFilter::All;
+        state.global.agent_filter = AgentFilter::All;
         state.rebuild_row_targets();
-        state.selected_agent_row = 2;
+        state.global.selected_agent_row = 2;
 
         // Switch to Running filter (only 1 pane) — cursor should clamp
-        state.agent_filter = AgentFilter::Running;
+        state.global.agent_filter = AgentFilter::Running;
         state.rebuild_row_targets();
-        assert_eq!(state.selected_agent_row, 0);
+        assert_eq!(state.global.selected_agent_row, 0);
         assert_eq!(state.agent_row_targets[0].pane_id, "%1");
     }
 
@@ -1559,10 +1547,10 @@ mod tests {
 
         // row 0 = filter bar (skipped), row 1 = first agent list row
         state.handle_mouse_click(2, 5); // row 2 → line_index = (2-1) = 1 → agent row 0
-        assert_eq!(state.selected_agent_row, 0);
+        assert_eq!(state.global.selected_agent_row, 0);
 
         state.handle_mouse_click(3, 5); // row 3 → line_index = (3-1) = 2 → agent row 1
-        assert_eq!(state.selected_agent_row, 1);
+        assert_eq!(state.global.selected_agent_row, 1);
     }
 
     #[test]
@@ -1572,21 +1560,21 @@ mod tests {
             pane_id: "%1".into(),
         }];
         state.line_to_row = vec![None, Some(0)];
-        state.selected_agent_row = 0;
-        state.agent_filter = AgentFilter::All;
+        state.global.selected_agent_row = 0;
+        state.global.agent_filter = AgentFilter::All;
 
         // Click on "All" (x=1..3) should keep All
         reset_filter_debounce(&mut state);
         state.handle_mouse_click(0, 1);
-        assert_eq!(state.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.agent_filter, AgentFilter::All);
 
         // Click on Running icon area (x=6..) should switch to Running
         reset_filter_debounce(&mut state);
         state.handle_mouse_click(0, 6);
-        assert_eq!(state.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.agent_filter, AgentFilter::Running);
 
         // agent selection unchanged
-        assert_eq!(state.selected_agent_row, 0);
+        assert_eq!(state.global.selected_agent_row, 0);
     }
 
     #[test]
@@ -1606,7 +1594,7 @@ mod tests {
 
         // row 3 → line_index = (3-1) + 2 = 4 → agent row 1
         state.handle_mouse_click(3, 5);
-        assert_eq!(state.selected_agent_row, 1);
+        assert_eq!(state.global.selected_agent_row, 1);
     }
 
     #[test]
@@ -1616,10 +1604,10 @@ mod tests {
             pane_id: "%1".into(),
         }];
         state.line_to_row = vec![None, Some(0)];
-        state.selected_agent_row = 0;
+        state.global.selected_agent_row = 0;
 
         state.handle_mouse_click(50, 5); // way beyond line_to_row
-        assert_eq!(state.selected_agent_row, 0); // unchanged
+        assert_eq!(state.global.selected_agent_row, 0); // unchanged
     }
 
     // ─── AgentFilter tests ───────────────────────────────────────────
@@ -1710,70 +1698,70 @@ mod tests {
         //                                              0123456789...
 
         // "All" at x=1..3
-        state.agent_filter = AgentFilter::Running;
+        state.global.agent_filter = AgentFilter::Running;
         reset_filter_debounce(&mut state);
         state.handle_filter_click(1);
-        assert_eq!(state.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.agent_filter, AgentFilter::All);
 
         reset_filter_debounce(&mut state);
         state.handle_filter_click(3);
-        assert_eq!(state.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.agent_filter, AgentFilter::All);
 
         // "●0" at x=6..7
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.agent_filter, AgentFilter::Running);
 
         // "◐0" at x=10..11
         reset_filter_debounce(&mut state);
         state.handle_filter_click(10);
-        assert_eq!(state.agent_filter, AgentFilter::Waiting);
+        assert_eq!(state.global.agent_filter, AgentFilter::Waiting);
 
         // "○0" at x=14..15
         reset_filter_debounce(&mut state);
         state.handle_filter_click(14);
-        assert_eq!(state.agent_filter, AgentFilter::Idle);
+        assert_eq!(state.global.agent_filter, AgentFilter::Idle);
 
         // "✕0" at x=18..19
         reset_filter_debounce(&mut state);
         state.handle_filter_click(18);
-        assert_eq!(state.agent_filter, AgentFilter::Error);
+        assert_eq!(state.global.agent_filter, AgentFilter::Error);
     }
 
     #[test]
     fn filter_click_gap_does_nothing() {
         let mut state = AppState::new("%99".into());
-        state.agent_filter = AgentFilter::All;
+        state.global.agent_filter = AgentFilter::All;
 
         // x=0 is leading space, x=4 and x=5 are separator
         state.handle_filter_click(0);
-        assert_eq!(state.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.agent_filter, AgentFilter::All);
 
         state.handle_filter_click(4);
-        assert_eq!(state.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.agent_filter, AgentFilter::All);
 
         state.handle_filter_click(5);
-        assert_eq!(state.agent_filter, AgentFilter::All);
+        assert_eq!(state.global.agent_filter, AgentFilter::All);
     }
 
     #[test]
     fn filter_click_debounce_ignores_rapid_clicks() {
         let mut state = AppState::new("%99".into());
-        state.agent_filter = AgentFilter::All;
+        state.global.agent_filter = AgentFilter::All;
 
         // First click within debounce window should be ignored
         // (AppState::new sets last_filter_click to now)
         state.handle_filter_click(6); // would be Running
-        assert_eq!(state.agent_filter, AgentFilter::All); // unchanged due to debounce
+        assert_eq!(state.global.agent_filter, AgentFilter::All); // unchanged due to debounce
 
         // After resetting debounce, click should work
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.agent_filter, AgentFilter::Running);
 
         // Immediate second click should be debounced
         state.handle_filter_click(1); // would be All
-        assert_eq!(state.agent_filter, AgentFilter::Running); // unchanged
+        assert_eq!(state.global.agent_filter, AgentFilter::Running); // unchanged
     }
 
     #[test]
@@ -1797,15 +1785,15 @@ mod tests {
         // "●10" at x=6..8 (icon + "10")
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.agent_filter, AgentFilter::Running);
         reset_filter_debounce(&mut state);
         state.handle_filter_click(8);
-        assert_eq!(state.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.agent_filter, AgentFilter::Running);
 
         // "◐0" shifts to x=11..12
         reset_filter_debounce(&mut state);
         state.handle_filter_click(11);
-        assert_eq!(state.agent_filter, AgentFilter::Waiting);
+        assert_eq!(state.global.agent_filter, AgentFilter::Waiting);
     }
 
     #[test]
@@ -1826,7 +1814,7 @@ mod tests {
                 (p3, PaneGitInfo::default()),
             ],
         }];
-        state.agent_filter = AgentFilter::All;
+        state.global.agent_filter = AgentFilter::All;
         state.rebuild_row_targets();
         assert_eq!(state.agent_row_targets.len(), 3);
 
@@ -1834,7 +1822,7 @@ mod tests {
         // Layout: " All  ●2  ◐0  ○1  ✕0" → Running at x=6
         reset_filter_debounce(&mut state);
         state.handle_filter_click(6);
-        assert_eq!(state.agent_filter, AgentFilter::Running);
+        assert_eq!(state.global.agent_filter, AgentFilter::Running);
         assert_eq!(state.agent_row_targets.len(), 2);
         assert_eq!(state.agent_row_targets[0].pane_id, "%1");
         assert_eq!(state.agent_row_targets[1].pane_id, "%3");
@@ -1843,7 +1831,7 @@ mod tests {
         // Layout: " All  ●2  ◐0  ○1  ✕0" → Idle at x=14
         reset_filter_debounce(&mut state);
         state.handle_filter_click(14);
-        assert_eq!(state.agent_filter, AgentFilter::Idle);
+        assert_eq!(state.global.agent_filter, AgentFilter::Idle);
         assert_eq!(state.agent_row_targets.len(), 1);
         assert_eq!(state.agent_row_targets[0].pane_id, "%2");
     }
@@ -1918,7 +1906,7 @@ mod tests {
                 panes: vec![(test_pane("%2"), PaneGitInfo::default())],
             },
         ];
-        state.repo_filter = RepoFilter::All;
+        state.global.repo_filter = RepoFilter::All;
         state.rebuild_row_targets();
 
         assert_eq!(state.agent_row_targets.len(), 2);
@@ -1939,7 +1927,7 @@ mod tests {
                 panes: vec![(test_pane("%2"), PaneGitInfo::default())],
             },
         ];
-        state.repo_filter = RepoFilter::Repo("app".into());
+        state.global.repo_filter = RepoFilter::Repo("app".into());
         state.rebuild_row_targets();
 
         assert_eq!(state.agent_row_targets.len(), 1);
@@ -1966,8 +1954,8 @@ mod tests {
                 panes: vec![(test_pane("%2"), PaneGitInfo::default())], // Running
             },
         ];
-        state.repo_filter = RepoFilter::Repo("app".into());
-        state.agent_filter = AgentFilter::Running;
+        state.global.repo_filter = RepoFilter::Repo("app".into());
+        state.global.agent_filter = AgentFilter::Running;
         state.rebuild_row_targets();
 
         // Only Running panes in "app" group
@@ -1983,10 +1971,10 @@ mod tests {
             has_focus: true,
             panes: vec![(test_pane("%1"), PaneGitInfo::default())],
         }];
-        state.repo_filter = RepoFilter::Repo("deleted-repo".into());
+        state.global.repo_filter = RepoFilter::Repo("deleted-repo".into());
         state.rebuild_row_targets();
 
-        assert_eq!(state.repo_filter, RepoFilter::All);
+        assert_eq!(state.global.repo_filter, RepoFilter::All);
         assert_eq!(state.agent_row_targets.len(), 1);
     }
 
@@ -2031,7 +2019,7 @@ mod tests {
 
         // Close and set filter to "beta" → selected should be 2
         state.close_repo_popup();
-        state.repo_filter = RepoFilter::Repo("beta".into());
+        state.global.repo_filter = RepoFilter::Repo("beta".into());
         state.toggle_repo_popup();
         assert_eq!(state.repo_popup_selected, 2); // ["All", "alpha", "beta"]
     }
@@ -2055,7 +2043,7 @@ mod tests {
         state.repo_popup_selected = 2; // "beta"
         state.confirm_repo_popup();
 
-        assert_eq!(state.repo_filter, RepoFilter::Repo("beta".into()));
+        assert_eq!(state.global.repo_filter, RepoFilter::Repo("beta".into()));
         assert!(!state.repo_popup_open);
         assert_eq!(state.agent_row_targets.len(), 1);
         assert_eq!(state.agent_row_targets[0].pane_id, "%2");
@@ -2069,12 +2057,12 @@ mod tests {
             has_focus: true,
             panes: vec![(test_pane("%1"), PaneGitInfo::default())],
         }];
-        state.repo_filter = RepoFilter::Repo("app".into());
+        state.global.repo_filter = RepoFilter::Repo("app".into());
         state.repo_popup_open = true;
         state.repo_popup_selected = 0; // "All"
         state.confirm_repo_popup();
 
-        assert_eq!(state.repo_filter, RepoFilter::All);
+        assert_eq!(state.global.repo_filter, RepoFilter::All);
     }
 
     #[test]
@@ -2096,14 +2084,14 @@ mod tests {
         ];
 
         // All repos: 2 total
-        state.repo_filter = RepoFilter::All;
+        state.global.repo_filter = RepoFilter::All;
         let (all, running, _, idle, _) = state.status_counts();
         assert_eq!(all, 2);
         assert_eq!(running, 1);
         assert_eq!(idle, 1);
 
         // Filter to "app" only: 1 Running
-        state.repo_filter = RepoFilter::Repo("app".into());
+        state.global.repo_filter = RepoFilter::Repo("app".into());
         let (all, running, _, idle, _) = state.status_counts();
         assert_eq!(all, 1);
         assert_eq!(running, 1);

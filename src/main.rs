@@ -91,7 +91,7 @@ fn run_app(
 ) -> io::Result<()> {
     let mut state = AppState::new(tmux_pane);
     state.theme = tmux_agent_sidebar::ui::colors::ColorTheme::from_tmux();
-    state.load_initial_global_state();
+    state.global.load_from_tmux();
     state.refresh();
 
     if let Some(ref pane_id) = state.focused_pane_id {
@@ -152,7 +152,7 @@ fn run_app(
                             }
                             Focus::Agents => {
                                 if state.move_agent_selection(1) {
-                                    state.save_cursor();
+                                    state.global.save_cursor();
                                 } else {
                                     state.focus = Focus::ActivityLog;
                                 }
@@ -163,7 +163,7 @@ fn run_app(
                             Focus::Filter => {}
                             Focus::Agents => {
                                 if state.move_agent_selection(-1) {
-                                    state.save_cursor();
+                                    state.global.save_cursor();
                                 } else {
                                     state.focus = Focus::Filter;
                                 }
@@ -186,15 +186,15 @@ fn run_app(
                         },
                         KeyCode::Char('h') | KeyCode::Left => {
                             if state.focus == Focus::Filter {
-                                state.agent_filter = state.agent_filter.prev();
-                                state.save_filter();
+                                state.global.agent_filter = state.global.agent_filter.prev();
+                                state.global.save_filter();
                                 state.rebuild_row_targets();
                             }
                         }
                         KeyCode::Char('l') | KeyCode::Right => {
                             if state.focus == Focus::Filter {
-                                state.agent_filter = state.agent_filter.next();
-                                state.save_filter();
+                                state.global.agent_filter = state.global.agent_filter.next();
+                                state.global.save_filter();
                                 state.rebuild_row_targets();
                             }
                         }
@@ -209,8 +209,8 @@ fn run_app(
                             }
                         }
                         KeyCode::Tab => {
-                            state.agent_filter = state.agent_filter.next();
-                            state.save_filter();
+                            state.global.agent_filter = state.global.agent_filter.next();
+                            state.global.save_filter();
                             state.rebuild_row_targets();
                         }
                         KeyCode::BackTab => {
@@ -266,7 +266,6 @@ fn run_app(
 
         let sigusr1 = NEEDS_REFRESH.swap(false, Ordering::Relaxed);
         if sigusr1 || last_refresh.elapsed() >= refresh_interval {
-            state.sync_global_state();
             state.refresh();
             git_tab_active.store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
             last_refresh = std::time::Instant::now();

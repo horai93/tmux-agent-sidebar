@@ -38,7 +38,7 @@ fn test_agents_auto_scroll_keeps_selected_visible() {
     assert_eq!(state.agents_scroll.offset, 0, "initially at top");
 
     // Select last agent and re-render
-    state.selected_agent_row = 9;
+    state.global.selected_agent_row = 9;
     let _ = render_to_string(&mut state, 28, 26);
     assert!(
         state.agents_scroll.offset > 0,
@@ -267,7 +267,7 @@ fn test_agents_auto_scroll_includes_group_bottom_border() {
     state.rebuild_row_targets();
 
     // Select the last agent
-    state.selected_agent_row = 5;
+    state.global.selected_agent_row = 5;
     // Use a tight height so agents area is small (height - 1 margin - 20 bottom)
     let output = render_to_string(&mut state, 28, 26);
 
@@ -305,12 +305,12 @@ fn test_agents_auto_scroll_up_shows_group_header() {
     state.rebuild_row_targets();
 
     // Scroll to bottom
-    state.selected_agent_row = 7;
+    state.global.selected_agent_row = 7;
     let _ = render_to_string(&mut state, 28, 26);
     assert!(state.agents_scroll.offset > 0, "should have scrolled down");
 
     // Now select first agent and re-render
-    state.selected_agent_row = 0;
+    state.global.selected_agent_row = 0;
     let output = render_to_string(&mut state, 28, 26);
 
     // The group header should be visible

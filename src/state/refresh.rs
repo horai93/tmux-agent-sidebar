@@ -60,10 +60,10 @@ impl AppState {
         self.auto_switch_tab();
     }
 
-    /// Fast refresh: tmux state + activity log (called every 1s)
+    /// Fast refresh: tmux state + activity log (called every 1s).
     pub fn refresh(&mut self) {
         self.refresh_now();
-        let (focused, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
+        let (focused, _, _, _) = tmux::get_sidebar_pane_info(&self.tmux_pane);
         self.apply_session_snapshot(focused, tmux::query_sessions());
         self.refresh_activity_data();
     }

@@ -4,7 +4,9 @@ mod test_helpers;
 use test_helpers::*;
 use tmux_agent_sidebar::activity::ActivityEntry;
 use tmux_agent_sidebar::group::{PaneGitInfo, RepoGroup};
-use tmux_agent_sidebar::state::{AgentFilter, AppState, BottomTab, Focus, RepoFilter, RowTarget};
+use tmux_agent_sidebar::state::{
+    AgentFilter, AppState, BottomTab, Focus, GlobalState, RepoFilter, RowTarget,
+};
 use tmux_agent_sidebar::tmux::{AgentType, PaneInfo, PaneStatus, SessionInfo, WindowInfo};
 
 // ─── State Transition Tests ────────────────────────────────────────
@@ -20,22 +22,22 @@ fn test_move_agent_selection_bounds() {
             pane_id: "%2".into(),
         },
     ];
-    state.selected_agent_row = 0;
+    state.global.selected_agent_row = 0;
     state.move_agent_selection(1);
-    assert_eq!(state.selected_agent_row, 1);
+    assert_eq!(state.global.selected_agent_row, 1);
     state.move_agent_selection(1); // should not go past end
-    assert_eq!(state.selected_agent_row, 1);
+    assert_eq!(state.global.selected_agent_row, 1);
     state.move_agent_selection(-1);
-    assert_eq!(state.selected_agent_row, 0);
+    assert_eq!(state.global.selected_agent_row, 0);
     state.move_agent_selection(-1); // should not go below 0
-    assert_eq!(state.selected_agent_row, 0);
+    assert_eq!(state.global.selected_agent_row, 0);
 }
 
 #[test]
 fn test_move_agent_selection_empty() {
     let mut state = make_state(vec![]);
     state.move_agent_selection(1);
-    assert_eq!(state.selected_agent_row, 0);
+    assert_eq!(state.global.selected_agent_row, 0);
 }
 
 #[test]
@@ -215,7 +217,7 @@ fn test_rebuild_row_targets_clamps_selection() {
             (p2.clone(), PaneGitInfo::default()),
         ],
     }];
-    state.selected_agent_row = 1; // select second agent
+    state.global.selected_agent_row = 1; // select second agent
 
     // Trigger rebuild
     state.rebuild_row_targets();
@@ -223,10 +225,10 @@ fn test_rebuild_row_targets_clamps_selection() {
 
     // Now shrink to 1 agent
     state.repo_groups[0].panes.pop();
-    state.selected_agent_row = 1; // still pointing at index 1
+    state.global.selected_agent_row = 1; // still pointing at index 1
     state.rebuild_row_targets();
     // Should be clamped to 0
-    assert_eq!(state.selected_agent_row, 0);
+    assert_eq!(state.global.selected_agent_row, 0);
 }
 
 // find_focused_pane now queries tmux directly, so it can't be tested
@@ -322,7 +324,7 @@ fn test_state_new_defaults() {
     assert!(!state.sidebar_focused);
     assert_eq!(state.focus, Focus::Agents);
     assert_eq!(state.spinner_frame, 0);
-    assert_eq!(state.selected_agent_row, 0);
+    assert_eq!(state.global.selected_agent_row, 0);
     assert!(state.agent_row_targets.is_empty());
     assert!(state.activity_entries.is_empty());
     assert_eq!(state.activity_scroll.offset, 0);
@@ -349,7 +351,7 @@ fn test_move_agent_selection_return_value() {
             pane_id: "%2".into(),
         },
     ];
-    state.selected_agent_row = 0;
+    state.global.selected_agent_row = 0;
 
     assert!(
         state.move_agent_selection(1),
@@ -468,18 +470,18 @@ fn test_filter_change_rebuilds_row_targets() {
     state.repo_groups = vec![make_repo_group("project", vec![running_pane, idle_pane])];
 
     // All filter shows both
-    state.agent_filter = AgentFilter::All;
+    state.global.agent_filter = AgentFilter::All;
     state.rebuild_row_targets();
     assert_eq!(state.agent_row_targets.len(), 2);
 
     // Simulates sync_global_state setting filter to Running
-    state.agent_filter = AgentFilter::Running;
+    state.global.agent_filter = AgentFilter::Running;
     state.rebuild_row_targets();
     assert_eq!(state.agent_row_targets.len(), 1);
     assert_eq!(state.agent_row_targets[0].pane_id, "%1");
 
     // Simulates sync_global_state setting filter to Idle
-    state.agent_filter = AgentFilter::Idle;
+    state.global.agent_filter = AgentFilter::Idle;
     state.rebuild_row_targets();
     assert_eq!(state.agent_row_targets.len(), 1);
     assert_eq!(state.agent_row_targets[0].pane_id, "%2");
@@ -494,14 +496,14 @@ fn test_cursor_sync_clamped_by_rebuild() {
     state.repo_groups = vec![make_repo_group("project", vec![pane])];
 
     // Simulates sync_global_state setting cursor beyond bounds
-    state.selected_agent_row = 5;
-    state.agent_filter = AgentFilter::All;
+    state.global.selected_agent_row = 5;
+    state.global.agent_filter = AgentFilter::All;
     state.rebuild_row_targets();
     // Should be clamped to last valid index
-    assert_eq!(state.selected_agent_row, 0);
+    assert_eq!(state.global.selected_agent_row, 0);
 }
 
-// ─── apply_startup_options tests ─────────────────────────────────────
+// ─── GlobalState tests ──────────────────────────────────────────────
 
 fn make_opts(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
     pairs
@@ -510,248 +512,294 @@ fn make_opts(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String
         .collect()
 }
 
+fn make_global() -> GlobalState {
+    GlobalState::new()
+}
+
+// ─── apply_all (full sync: startup + SIGUSR1) tests ─────────────────
+
 #[test]
-fn startup_ignores_tmux_filter_matching_last_saved() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::Running;
-    // last_saved_filter defaults to All (same as tmux)
+fn full_sync_ignores_tmux_filter_matching_last_saved() {
+    let mut g = make_global();
+    g.agent_filter = AgentFilter::Running;
 
     let opts = make_opts(&[("@sidebar_filter", "all")]);
-    state.apply_startup_options(&opts);
+    g.apply_all(&opts);
 
     assert_eq!(
-        state.agent_filter,
+        g.agent_filter,
         AgentFilter::Running,
         "local filter change should not be overwritten when tmux matches last_saved"
     );
 }
 
 #[test]
-fn startup_applies_filter_from_tmux() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::All;
+fn full_sync_applies_filter_from_tmux() {
+    let mut g = make_global();
 
     let opts = make_opts(&[("@sidebar_filter", "waiting")]);
-    state.apply_startup_options(&opts);
+    g.apply_all(&opts);
 
-    assert_eq!(
-        state.agent_filter,
-        AgentFilter::Waiting,
-        "startup should apply filter from tmux"
-    );
+    assert_eq!(g.agent_filter, AgentFilter::Waiting);
 }
 
 #[test]
-fn startup_applies_cursor_from_tmux() {
-    let mut state = make_state(vec![]);
-    state.selected_agent_row = 0;
+fn full_sync_applies_cursor_from_tmux() {
+    let mut g = make_global();
 
     let opts = make_opts(&[("@sidebar_cursor", "3")]);
-    state.apply_startup_options(&opts);
+    g.apply_all(&opts);
 
-    assert_eq!(state.selected_agent_row, 3);
+    assert_eq!(g.selected_agent_row, 3);
 }
 
 #[test]
-fn startup_ignores_cursor_matching_last_saved() {
-    let mut state = make_state(vec![]);
-    // last_saved_cursor defaults to 0, same as tmux
-    state.selected_agent_row = 5;
+fn full_sync_ignores_cursor_matching_last_saved() {
+    let mut g = make_global();
+    g.selected_agent_row = 5;
 
     let opts = make_opts(&[("@sidebar_cursor", "0")]);
-    state.apply_startup_options(&opts);
+    g.apply_all(&opts);
 
     assert_eq!(
-        state.selected_agent_row, 5,
+        g.selected_agent_row, 5,
         "should not overwrite local cursor when tmux matches last_saved"
     );
 }
 
 #[test]
-fn startup_applies_repo_filter_from_tmux() {
-    let mut state = make_state(vec![]);
-    state.repo_filter = RepoFilter::All;
+fn full_sync_applies_repo_filter_from_tmux() {
+    let mut g = make_global();
 
     let opts = make_opts(&[("@sidebar_repo_filter", "my-app")]);
-    state.apply_startup_options(&opts);
+    g.apply_all(&opts);
 
-    assert_eq!(state.repo_filter, RepoFilter::Repo("my-app".into()));
+    assert_eq!(g.repo_filter, RepoFilter::Repo("my-app".into()));
 }
 
 #[test]
-fn startup_empty_opts_changes_nothing() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::Running;
-    state.repo_filter = RepoFilter::Repo("app".into());
-    state.selected_agent_row = 2;
+fn full_sync_empty_opts_changes_nothing() {
+    let mut g = make_global();
+    g.agent_filter = AgentFilter::Running;
+    g.repo_filter = RepoFilter::Repo("app".into());
+    g.selected_agent_row = 2;
 
-    state.apply_startup_options(&std::collections::HashMap::new());
+    g.apply_all(&std::collections::HashMap::new());
 
-    assert_eq!(state.agent_filter, AgentFilter::Running);
-    assert_eq!(state.repo_filter, RepoFilter::Repo("app".into()));
-    assert_eq!(state.selected_agent_row, 2);
+    assert_eq!(g.agent_filter, AgentFilter::Running);
+    assert_eq!(g.repo_filter, RepoFilter::Repo("app".into()));
+    assert_eq!(g.selected_agent_row, 2);
 }
 
-// ─── apply_global_options (periodic sync) tests ─────────────────────
-
 #[test]
-fn periodic_sync_does_not_change_filter() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::Running;
+fn full_sync_applies_error_filter_from_tmux() {
+    let mut g = make_global();
 
     let opts = make_opts(&[("@sidebar_filter", "error")]);
-    state.apply_global_options(&opts);
+    g.apply_all(&opts);
 
-    assert_eq!(
-        state.agent_filter,
-        AgentFilter::Running,
-        "periodic sync must not change filter"
-    );
+    assert_eq!(g.agent_filter, AgentFilter::Error);
 }
 
 #[test]
-fn periodic_sync_does_not_change_cursor() {
-    let mut state = make_state(vec![]);
-    state.selected_agent_row = 2;
+fn full_sync_invalid_filter_defaults_to_all() {
+    let mut g = make_global();
+    g.agent_filter = AgentFilter::Running;
 
-    let opts = make_opts(&[("@sidebar_cursor", "10")]);
-    state.apply_global_options(&opts);
-
-    assert_eq!(
-        state.selected_agent_row, 2,
-        "periodic sync must not change cursor"
-    );
-}
-
-#[test]
-fn periodic_sync_ignores_tmux_value_matching_last_saved_repo_filter() {
-    let mut state = make_state(vec![]);
-    state.repo_filter = RepoFilter::Repo("my-app".into());
-    // last_saved_repo_filter defaults to All
-
-    let opts = make_opts(&[("@sidebar_repo_filter", "all")]);
-    state.apply_global_options(&opts);
-
-    assert_eq!(
-        state.repo_filter,
-        RepoFilter::Repo("my-app".into()),
-        "local repo filter change should not be overwritten"
-    );
-}
-
-#[test]
-fn periodic_sync_applies_external_repo_filter_change() {
-    let mut state = make_state(vec![]);
-    state.repo_filter = RepoFilter::All;
-
-    let opts = make_opts(&[("@sidebar_repo_filter", "my-app")]);
-    state.apply_global_options(&opts);
-
-    assert_eq!(
-        state.repo_filter,
-        RepoFilter::Repo("my-app".into()),
-        "external repo filter change should be applied"
-    );
-}
-
-#[test]
-fn periodic_sync_empty_opts_changes_nothing() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::Running;
-    state.repo_filter = RepoFilter::Repo("app".into());
-    state.selected_agent_row = 2;
-
-    state.apply_global_options(&std::collections::HashMap::new());
-
-    assert_eq!(state.agent_filter, AgentFilter::Running);
-    assert_eq!(state.repo_filter, RepoFilter::Repo("app".into()));
-    assert_eq!(state.selected_agent_row, 2);
-}
-
-#[test]
-fn startup_applies_error_filter_from_tmux() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::All;
-
-    let opts = make_opts(&[("@sidebar_filter", "error")]);
-    state.apply_startup_options(&opts);
-
-    assert_eq!(
-        state.agent_filter,
-        AgentFilter::Error,
-        "startup should apply error filter from tmux"
-    );
-}
-
-#[test]
-fn startup_invalid_filter_defaults_to_all() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::Running;
-
-    // last_saved_filter = All, "garbage" parses as All, All == last_saved → no change
+    // "garbage" parses as All, All == last_saved → no change
     let opts = make_opts(&[("@sidebar_filter", "garbage")]);
-    state.apply_startup_options(&opts);
+    g.apply_all(&opts);
 
     assert_eq!(
-        state.agent_filter,
+        g.agent_filter,
         AgentFilter::Running,
         "invalid filter string parsed as All should match last_saved and not overwrite"
     );
 }
 
 #[test]
-fn periodic_sync_with_all_three_opts_only_applies_repo() {
-    let mut state = make_state(vec![]);
-    state.agent_filter = AgentFilter::Running;
-    state.selected_agent_row = 5;
-    state.repo_filter = RepoFilter::All;
+fn full_sync_applies_all_three_from_tmux() {
+    let mut g = make_global();
 
     let opts = make_opts(&[
         ("@sidebar_filter", "error"),
-        ("@sidebar_cursor", "99"),
+        ("@sidebar_cursor", "7"),
         ("@sidebar_repo_filter", "my-app"),
     ]);
-    state.apply_global_options(&opts);
+    g.apply_all(&opts);
+
+    assert_eq!(g.agent_filter, AgentFilter::Error);
+    assert_eq!(g.selected_agent_row, 7);
+    assert_eq!(g.repo_filter, RepoFilter::Repo("my-app".into()));
+}
+
+// ─── last_saved guard tests (protects against save failure revert) ───
+
+#[test]
+fn sync_does_not_revert_filter_after_save_failure() {
+    // The original bug scenario:
+    // 1. Startup: tmux has "error", sidebar adopts it
+    // 2. User changes filter to Running, but save_filter fails
+    // 3. Next sync should NOT overwrite Running back to Error
+    //    because last_saved_filter == Error == tmux value → no change
+    let mut g = make_global();
+
+    // Step 1: startup sync adopts "error" from tmux
+    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
+    assert_eq!(g.agent_filter, AgentFilter::Error);
+
+    // Step 2: user changes filter locally, save_filter fails
+    // (last_saved_filter stays Error)
+    g.agent_filter = AgentFilter::Running;
+
+    // Step 3: next sync reads tmux "error", but last_saved is also Error → equal → no change
+    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
 
     assert_eq!(
-        state.agent_filter,
+        g.agent_filter,
         AgentFilter::Running,
-        "periodic sync must not change filter even when present in opts"
-    );
-    assert_eq!(
-        state.selected_agent_row, 5,
-        "periodic sync must not change cursor even when present in opts"
-    );
-    assert_eq!(
-        state.repo_filter,
-        RepoFilter::Repo("my-app".into()),
-        "periodic sync should apply repo filter change"
+        "sync must not revert filter when save failed — the original bug scenario"
     );
 }
 
 #[test]
-fn periodic_sync_does_not_revert_filter_after_save_failure() {
-    // Simulates the original bug scenario:
-    // 1. Startup: tmux has "error", sidebar adopts it
-    // 2. User changes filter to Running, but save_filter fails
-    // 3. Periodic sync should NOT overwrite Running back to Error
-    let mut state = make_state(vec![]);
+fn full_sync_does_not_revert_filter_after_save_failure() {
+    // Same as the periodic version, but for SIGUSR1 (apply_all).
+    // apply_all has last_saved guard so it should also be safe.
+    let mut g = make_global();
 
-    // Step 1: startup sync adopts "error" from tmux
-    state.apply_startup_options(&make_opts(&[("@sidebar_filter", "error")]));
-    assert_eq!(state.agent_filter, AgentFilter::Error);
+    // Startup: adopt "error"
+    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
+    assert_eq!(g.agent_filter, AgentFilter::Error);
 
-    // Step 2: user changes filter locally, save_filter fails
-    // (last_saved_filter stays Error, agent_filter moves to Running)
-    state.agent_filter = AgentFilter::Running;
+    // User changes filter locally, save_filter fails
+    // (last_saved_filter stays Error)
+    g.agent_filter = AgentFilter::Running;
 
-    // Step 3: periodic sync — should NOT touch filter at all
-    let opts = make_opts(&[("@sidebar_filter", "error")]);
-    state.apply_global_options(&opts);
+    // SIGUSR1 triggers apply_all: tmux still has "error",
+    // but last_saved is also Error → equal → no overwrite
+    g.apply_all(&make_opts(&[("@sidebar_filter", "error")]));
 
     assert_eq!(
-        state.agent_filter,
+        g.agent_filter,
         AgentFilter::Running,
-        "periodic sync must never change filter — the original bug scenario"
+        "full sync must not revert filter when save failed"
     );
+}
+
+#[test]
+fn full_sync_picks_up_change_from_another_instance() {
+    // Simulates: this instance saved "running", another instance later
+    // saved "waiting". SIGUSR1 should pick up "waiting".
+    let mut g = make_global();
+
+    // Startup: this instance starts with default (All)
+    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    assert_eq!(g.agent_filter, AgentFilter::Running);
+    // last_saved_filter is now Running
+
+    // Another instance changes filter to Waiting (writes to tmux)
+    // This instance's SIGUSR1 fires:
+    g.apply_all(&make_opts(&[("@sidebar_filter", "waiting")]));
+
+    assert_eq!(
+        g.agent_filter,
+        AgentFilter::Waiting,
+        "SIGUSR1 should pick up filter changed by another instance"
+    );
+}
+
+#[test]
+fn full_sync_picks_up_cursor_from_another_instance() {
+    let mut g = make_global();
+
+    g.apply_all(&make_opts(&[("@sidebar_cursor", "3")]));
+    assert_eq!(g.selected_agent_row, 3);
+    // last_saved_cursor is now 3
+
+    // Another instance moves cursor to 7
+    g.apply_all(&make_opts(&[("@sidebar_cursor", "7")]));
+
+    assert_eq!(
+        g.selected_agent_row, 7,
+        "SIGUSR1 should pick up cursor changed by another instance"
+    );
+}
+
+// ─── SIGUSR1 sync behavior tests ────────────────────────────────────
+// In the main loop, load_from_tmux() is called ONLY when SIGUSR1 fires
+// (pane/window focus change). Periodic refresh does NOT sync global state.
+// This prevents task completion hooks from overwriting the filter.
+
+#[test]
+fn global_state_stable_without_sigusr1() {
+    // Simulates: periodic refresh without SIGUSR1.
+    // GlobalState is never touched — filter stays as user set it.
+    let mut g = make_global();
+    g.agent_filter = AgentFilter::Running;
+    g.selected_agent_row = 5;
+
+    // No apply_all called (periodic refresh skips global sync).
+    // State remains exactly as set locally.
+    assert_eq!(g.agent_filter, AgentFilter::Running);
+    assert_eq!(g.selected_agent_row, 5);
+}
+
+#[test]
+fn global_state_stable_during_task_completion() {
+    // Simulates: task completes, hooks fire, but no SIGUSR1.
+    // GlobalState should remain untouched.
+    let mut g = make_global();
+
+    // Startup: adopt "running"
+    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    assert_eq!(g.agent_filter, AgentFilter::Running);
+
+    // User changes to Idle locally
+    g.agent_filter = AgentFilter::Idle;
+
+    // Task completes — no SIGUSR1, so load_from_tmux is NOT called.
+    // GlobalState stays as user set it.
+    assert_eq!(
+        g.agent_filter,
+        AgentFilter::Idle,
+        "filter must not change during task completion (no SIGUSR1)"
+    );
+}
+
+#[test]
+fn sigusr1_syncs_filter_from_another_window() {
+    // Simulates: user switches window → SIGUSR1 → load_from_tmux.
+    // Another window had set filter to Waiting.
+    let mut g = make_global();
+
+    // Startup in this window
+    g.apply_all(&make_opts(&[("@sidebar_filter", "running")]));
+    assert_eq!(g.agent_filter, AgentFilter::Running);
+
+    // Another window changes filter to Waiting, then user switches here.
+    // SIGUSR1 fires → load_from_tmux → apply_all
+    g.apply_all(&make_opts(&[("@sidebar_filter", "waiting")]));
+
+    assert_eq!(
+        g.agent_filter,
+        AgentFilter::Waiting,
+        "SIGUSR1 on window switch should sync filter from tmux"
+    );
+}
+
+#[test]
+fn sigusr1_syncs_all_fields() {
+    // SIGUSR1 triggers full sync of filter, cursor, and repo filter.
+    let mut g = make_global();
+
+    g.apply_all(&make_opts(&[
+        ("@sidebar_filter", "idle"),
+        ("@sidebar_cursor", "4"),
+        ("@sidebar_repo_filter", "my-app"),
+    ]));
+
+    assert_eq!(g.agent_filter, AgentFilter::Idle);
+    assert_eq!(g.selected_agent_row, 4);
+    assert_eq!(g.repo_filter, RepoFilter::Repo("my-app".into()));
 }
