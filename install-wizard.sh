@@ -52,6 +52,24 @@ function detect_platform() {
     echo "${os}-${arch}"
 }
 
+function stop_running_instances() {
+    # Kill any running instances so the next launch picks up the new binary.
+    # Match the full binary path to avoid touching unrelated processes.
+    pkill -f "$BINARY" 2>/dev/null || true
+}
+
+function post_install_fixups() {
+    # macOS: strip provenance/quarantine xattrs and re-sign the binary so
+    # Gatekeeper on Sequoia+ doesn't SIGKILL downloaded adhoc-signed binaries.
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        xattr -d com.apple.provenance "$BINARY" 2>/dev/null || true
+        xattr -d com.apple.quarantine "$BINARY" 2>/dev/null || true
+        codesign --force --sign - "$BINARY" >/dev/null 2>&1 || true
+    fi
+
+    stop_running_instances
+}
+
 function download_binary() {
     mkdir -p "$BIN_DIR"
     local platform
@@ -67,6 +85,8 @@ function download_binary() {
         return 1
     fi
     chmod +x "$BINARY"
+
+    post_install_fixups
 
     echo "Download complete!"
 }
@@ -86,6 +106,8 @@ function build_from_source() {
 
     mkdir -p "$BIN_DIR"
     cp "$PLUGIN_DIR/target/release/tmux-agent-sidebar" "$BINARY"
+
+    post_install_fixups
 
     echo "Build complete!"
 }
