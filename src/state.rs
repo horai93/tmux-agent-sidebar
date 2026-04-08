@@ -273,6 +273,8 @@ pub struct AppState {
     /// Cat animation frame index (0 = sitting, 1-2 = running).
     pub cat_frame: usize,
     pub cat_bob_timer: usize,
+    /// Update notice shown when a newer GitHub release is available.
+    pub version_notice: Option<crate::version::UpdateNotice>,
     /// Shared state across sidebar instances, persisted to tmux global variables.
     pub global: GlobalState,
     /// Hyperlink overlays to be written after frame render (OSC 8).
@@ -324,6 +326,7 @@ impl AppState {
             cat_x: crate::ui::cat::CAT_HOME_X,
             cat_frame: 0,
             cat_bob_timer: 0,
+            version_notice: None,
             global: GlobalState::new(),
             hyperlink_overlays: vec![],
         }

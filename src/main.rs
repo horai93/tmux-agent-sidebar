@@ -17,6 +17,7 @@ use tmux_agent_sidebar::git::{self, GitData};
 use tmux_agent_sidebar::state::{AppState, BottomTab, Focus, HyperlinkOverlay};
 use tmux_agent_sidebar::tmux;
 use tmux_agent_sidebar::ui;
+use tmux_agent_sidebar::version::UpdateNotice;
 
 static NEEDS_REFRESH: AtomicBool = AtomicBool::new(false);
 
@@ -103,12 +104,18 @@ fn run_app(
     }
 
     let (git_tx, git_rx) = mpsc::channel::<GitData>();
+    let (version_tx, version_rx) = mpsc::channel::<UpdateNotice>();
     let tmux_pane_clone = state.tmux_pane.clone();
     let git_tab_active =
         std::sync::Arc::new(AtomicBool::new(state.bottom_tab == BottomTab::GitStatus));
     let git_tab_flag = std::sync::Arc::clone(&git_tab_active);
     std::thread::spawn(move || {
         git_poll_loop(&tmux_pane_clone, &git_tx, &git_tab_flag);
+    });
+    std::thread::spawn(move || {
+        if let Some(notice) = tmux_agent_sidebar::version::fetch_update_notice() {
+            let _ = version_tx.send(notice);
+        }
     });
 
     let mut last_refresh = std::time::Instant::now();
@@ -287,6 +294,10 @@ fn run_app(
 
         if let Ok(data) = git_rx.try_recv() {
             state.apply_git_data(data);
+        }
+
+        if let Ok(notice) = version_rx.try_recv() {
+            state.version_notice = Some(notice);
         }
     }
 }

@@ -126,6 +126,18 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
     (Line::from(spans), repo_button_col)
 }
 
+fn render_version_banner<'a>(state: &AppState, width: usize) -> Option<Line<'a>> {
+    let theme = &state.theme;
+    let notice = state.version_notice.as_ref()?;
+    let text = format!("new release v{}!", notice.latest_version);
+    let gap = pad_to(display_width(&text), width);
+
+    Some(Line::from(vec![
+        Span::raw(gap),
+        Span::styled(text, Style::default().fg(theme.status_waiting)),
+    ]))
+}
+
 fn render_repo_popup(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let theme = &state.theme;
     let repos = state.repo_names();
@@ -221,6 +233,11 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let mut lines: Vec<Line<'_>> = Vec::new();
     let mut line_to_row: Vec<Option<usize>> = Vec::new();
     let mut row_index: usize = 0;
+
+    if let Some(version_banner) = render_version_banner(state, width) {
+        lines.push(version_banner);
+        line_to_row.push(None);
+    }
 
     let filter = state.global.agent_filter;
 
@@ -701,6 +718,21 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    #[test]
+    fn render_version_banner_right_aligns() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.version_notice = Some(crate::version::UpdateNotice {
+            local_version: "0.2.6".into(),
+            latest_version: "0.2.7".into(),
+        });
+
+        let line = render_version_banner(&state, 30).expect("banner should render");
+        let text = line_text(&line);
+
+        assert!(text.ends_with("new release v0.2.7!"));
+        assert_eq!(display_width(&text), 30);
     }
 
     #[test]

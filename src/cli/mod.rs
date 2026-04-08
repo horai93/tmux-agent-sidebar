@@ -17,7 +17,7 @@ pub fn run(args: &[String]) -> Option<i32> {
         "auto-close" => toggle::cmd_auto_close(rest),
         "set-status" => cmd_set_status(rest),
         "--version" | "version" => {
-            println!("{}", env!("CARGO_PKG_VERSION"));
+            println!("{}", crate::VERSION);
             0
         }
         _ => return None,
