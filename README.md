@@ -2,8 +2,6 @@
 
 A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across every session and window — statuses, prompts, git info, activity logs, and more in one place.
 
-## Screenshots
-
 ![main](assets/main.png)
 
 <table>
@@ -32,6 +30,7 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 ## Requirements
 
 - tmux 3.0+
+- [TPM](https://github.com/tmux-plugins/tpm) (recommended, for plugin installation)
 - [Rust](https://rustup.rs/) (only if building from source)
 - [GitHub CLI](https://cli.github.com/) (optional, for PR number display in Git tab)
 
@@ -39,7 +38,7 @@ A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across ev
 
 ### 1. Installation
 
-#### TPM (recommended)
+#### Installation with TPM
 
 Add the plugin to your `tmux.conf`:
 
@@ -88,7 +87,7 @@ run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 
    </details>
 
-Reload tmux config with `prefix + r`.
+Reload tmux config with `prefix + r` after updating `tmux.conf`. This works for both TPM and manual installs.
 
 ### 2. Agent Hooks
 
