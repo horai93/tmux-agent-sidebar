@@ -48,6 +48,12 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
     spans.push(Span::raw(" "));
     let mut current_width: usize = 1;
 
+    let selected_style = |style: Style| {
+        style
+            .underline_color(theme.text_active)
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    };
+
     for (i, (filter, icon_info, count)) in items.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw("  "));
@@ -57,34 +63,31 @@ fn render_filter_bar<'a>(state: &AppState, bar_width: u16) -> (Line<'a>, u16) {
         let is_selected = state.global.agent_filter == filter;
 
         if let Some((icon, icon_color)) = icon_info {
-            let mut icon_style = if is_selected || count > 0 {
-                Style::default().fg(icon_color)
+            let icon_style = Style::default().fg(icon_color);
+            let icon_style = if is_selected {
+                selected_style(icon_style)
             } else {
-                Style::default().fg(theme.border_inactive)
+                icon_style
             };
-            if is_selected {
-                icon_style = icon_style.add_modifier(Modifier::UNDERLINED);
-            }
             spans.push(Span::styled(icon.to_string(), icon_style));
             current_width += display_width(icon);
 
             let count_str = format!("{count}");
-            let count_style = if is_selected {
-                Style::default()
-                    .fg(theme.text_active)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
-            } else if count == 0 {
+            let count_style = if count == 0 {
                 Style::default().fg(theme.border_inactive)
             } else {
-                Style::default().fg(theme.text_muted)
+                Style::default().fg(theme.text_active)
+            };
+            let count_style = if is_selected {
+                selected_style(count_style)
+            } else {
+                count_style
             };
             current_width += count_str.len();
             spans.push(Span::styled(count_str, count_style));
         } else {
             let style = if is_selected {
-                Style::default()
-                    .fg(theme.text_active)
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                selected_style(Style::default().fg(theme.text_active))
             } else {
                 Style::default().fg(theme.text_muted)
             };

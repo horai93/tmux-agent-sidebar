@@ -61,6 +61,9 @@ pub fn buffer_to_styled_string(buf: &Buffer) -> String {
             if let Color::Indexed(n) = cell.bg {
                 attrs.push(format!("bg:{n}"));
             }
+            if let Color::Indexed(n) = cell.underline_color {
+                attrs.push(format!("ul:{n}"));
+            }
             if cell.modifier.contains(Modifier::BOLD) {
                 attrs.push("bold".into());
             }

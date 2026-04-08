@@ -1216,16 +1216,30 @@ fn snapshot_filter_bar_icon_colors() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
     let styled = render_to_styled_string(&mut state, 30, 25);
-    // Running icon (●) should use status_running color (114)
+    // Each filter icon should use its status color, even when the count is 0.
     assert!(
         styled.contains("fg:114"),
         "running icon should use status_running color"
     );
-    // Waiting icon with 0 count should use border_inactive color (240)
-    // Check that 240 appears (border_inactive is used for zero-count items)
+    assert!(
+        styled.contains("fg:221"),
+        "waiting icon should use status_waiting color"
+    );
+    assert!(
+        styled.contains("fg:109"),
+        "idle icon should use status_idle color"
+    );
+    assert!(
+        styled.contains("fg:203"),
+        "error icon should use status_error color"
+    );
+    assert!(
+        styled.contains("fg:255"),
+        "non-zero filter counts should be white"
+    );
     assert!(
         styled.contains("fg:240"),
-        "zero-count icons should use border_inactive color"
+        "zero filter counts should remain muted"
     );
 }
 
@@ -1267,6 +1281,36 @@ fn snapshot_filter_selected_has_underline() {
     assert!(
         styled.contains("underline"),
         "selected filter should be underlined"
+    );
+}
+
+#[test]
+fn snapshot_filter_selection_does_not_use_status_color() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.global.agent_filter = AgentFilter::Running;
+
+    let styled = render_to_styled_string(&mut state, 30, 25);
+    assert!(
+        styled.contains("underline"),
+        "selected filter should still be visibly marked"
+    );
+    assert!(
+        styled.contains("fg:114"),
+        "selected filter should keep the running icon color"
+    );
+}
+
+#[test]
+fn snapshot_filter_selection_uses_visible_underline_color_when_count_is_zero() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
+    state.global.agent_filter = AgentFilter::Running;
+
+    let styled = render_to_styled_string(&mut state, 30, 25);
+    assert!(
+        styled.contains("ul:255"),
+        "selected filter should use the active underline color even when the text is muted"
     );
 }
 

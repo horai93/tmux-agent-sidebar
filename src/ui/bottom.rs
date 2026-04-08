@@ -3,10 +3,10 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
-use crate::state::{AppState, BottomTab};
+use crate::state::{AppState, BottomTab, Focus};
 
 use super::text::{display_width, pad_to, truncate_to_width, wrap_text_char};
 
@@ -40,18 +40,48 @@ fn render_centered(frame: &mut Frame, area: Rect, text: &str, color: Color) {
 
 pub fn draw_bottom(frame: &mut Frame, state: &mut AppState, area: Rect) {
     let theme = &state.theme;
-    let border_color = theme.border_active;
+    let border_color = if state.focus == Focus::ActivityLog {
+        theme.border_active
+    } else {
+        theme.border_inactive
+    };
 
     let tab_title = build_tab_title(state);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .title(tab_title)
         .style(Style::default().fg(border_color));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
+
+    let title_spans = tab_title.spans;
+    let title_dw = title_spans
+        .iter()
+        .map(|span| display_width(&span.content))
+        .sum::<usize>();
+    let top_fill_len = (area.width as usize).saturating_sub(title_dw + 4);
+    let mut top_line_spans = vec![Span::styled("╭ ", Style::default().fg(border_color))];
+    top_line_spans.extend(title_spans);
+    top_line_spans.push(Span::styled(
+        format!(" {}╮", "─".repeat(top_fill_len)),
+        Style::default().fg(border_color),
+    ));
+    let top_line = Line::from(top_line_spans);
+    let top_rect = Rect::new(area.x, area.y, area.width, 1);
+    frame.render_widget(Paragraph::new(top_line), top_rect);
+
+    let bottom_line = Line::from(Span::styled(
+        format!("╰{}╯", "─".repeat((area.width as usize).saturating_sub(2))),
+        Style::default().fg(border_color),
+    ));
+    let bottom_rect = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
+    frame.render_widget(Paragraph::new(bottom_line), bottom_rect);
 
     match state.bottom_tab {
         BottomTab::Activity => draw_activity_content(frame, state, inner),
@@ -80,9 +110,9 @@ fn build_tab_title(state: &AppState) -> Line<'static> {
     let sep_style = Style::default().fg(theme.border_inactive);
 
     Line::from(vec![
-        Span::styled(" Activity ", activity_style),
-        Span::styled("\u{2502}", sep_style),
-        Span::styled(" Git ", git_style),
+        Span::styled("Activity", activity_style),
+        Span::styled(" \u{2502} ", sep_style),
+        Span::styled("Git", git_style),
     ])
 }
 
