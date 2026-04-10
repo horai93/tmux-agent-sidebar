@@ -313,13 +313,11 @@ pub fn draw_agents(frame: &mut Frame, state: &mut AppState, area: Rect) {
 
             let pane_state = state.pane_state(&pane.pane_id);
             let ports = pane_state.map(|s| s.ports.as_slice());
-            let command = None;
             let task_progress = pane_state.and_then(|s| s.task_progress.as_ref());
             let pane_lines = row::render_pane_lines_with_ports(
                 pane,
                 git_info,
                 ports,
-                command,
                 task_progress,
                 is_selected,
                 is_active,

@@ -11,55 +11,53 @@ use crate::ui::text::{
     wrap_text_char,
 };
 
-/// Shared context passed to each row-rendering helper.
 struct RowCtx<'a> {
     border_style: Style,
     inner_width: usize,
     theme: &'a ColorTheme,
-    apply_bg: &'a dyn Fn(Style) -> Style,
+    bg: Option<Color>,
     active: bool,
 }
 
-fn bordered_line(
-    border_style: Style,
-    apply_bg: &dyn Fn(Style) -> Style,
-    inner_width: usize,
-    content_spans: Vec<Span<'static>>,
-    content_width: usize,
-) -> Line<'static> {
-    let padding = pad_to(content_width, inner_width);
-    let mut spans = vec![
-        Span::styled("│", border_style),
-        Span::styled(" ", apply_bg(Style::default())),
-    ];
-    spans.extend(content_spans);
-    spans.push(Span::styled(padding, apply_bg(Style::default())));
-    spans.push(Span::styled("│", border_style));
-    Line::from(spans)
-}
+impl RowCtx<'_> {
+    #[inline]
+    fn apply_bg(&self, style: Style) -> Style {
+        match self.bg {
+            Some(c) => style.bg(c),
+            None => style,
+        }
+    }
 
-fn bordered_split_line(
-    border_style: Style,
-    apply_bg: &dyn Fn(Style) -> Style,
-    inner_width: usize,
-    left_spans: Vec<Span<'static>>,
-    left_width: usize,
-    right_spans: Vec<Span<'static>>,
-    right_width: usize,
-) -> Line<'static> {
-    let padding = inner_width.saturating_sub(left_width + right_width);
-    let mut spans = vec![
-        Span::styled("│", border_style),
-        Span::styled(" ", apply_bg(Style::default())),
-    ];
-    spans.extend(left_spans);
-    spans.push(Span::styled(
-        " ".repeat(padding),
-        apply_bg(Style::default()),
-    ));
-    spans.extend(right_spans);
-    spans.push(Span::styled("│", border_style));
-    Line::from(spans)
+    fn bordered(&self, content_spans: Vec<Span<'static>>, content_width: usize) -> Line<'static> {
+        let padding = pad_to(content_width, self.inner_width);
+        let bg_default = self.apply_bg(Style::default());
+        let mut spans = Vec::with_capacity(content_spans.len() + 4);
+        spans.push(Span::styled("│", self.border_style));
+        spans.push(Span::styled(" ", bg_default));
+        spans.extend(content_spans);
+        spans.push(Span::styled(padding, bg_default));
+        spans.push(Span::styled("│", self.border_style));
+        Line::from(spans)
+    }
+
+    fn bordered_split(
+        &self,
+        left_spans: Vec<Span<'static>>,
+        left_width: usize,
+        right_spans: Vec<Span<'static>>,
+        right_width: usize,
+    ) -> Line<'static> {
+        let padding = self.inner_width.saturating_sub(left_width + right_width);
+        let bg_default = self.apply_bg(Style::default());
+        let mut spans = Vec::with_capacity(left_spans.len() + right_spans.len() + 4);
+        spans.push(Span::styled("│", self.border_style));
+        spans.push(Span::styled(" ", bg_default));
+        spans.extend(left_spans);
+        spans.push(Span::styled(" ".repeat(padding), bg_default));
+        spans.extend(right_spans);
+        spans.push(Span::styled("│", self.border_style));
+        Line::from(spans)
+    }
 }
 
 fn status_row(
@@ -71,7 +69,6 @@ fn status_row(
 ) -> Line<'static> {
     use crate::tmux::PermissionMode;
     let theme = ctx.theme;
-    let apply_bg = ctx.apply_bg;
 
     let (icon, pulse_color) = running_icon_for(&pane.status, spinner_frame, icons);
     let icon_color =
@@ -101,15 +98,18 @@ fn status_row(
     let elapsed_dw = display_width(&elapsed);
     let padding = pad_to(left_dw + elapsed_dw, ctx.inner_width);
 
-    let mut spans: Vec<Span<'static>> = vec![
-        Span::styled("│", ctx.border_style),
-        Span::styled(" ", apply_bg(Style::default())),
-        Span::styled(icon.to_string(), apply_bg(Style::default().fg(icon_color))),
-        Span::styled(
-            format!(" {}", title),
-            apply_bg(Style::default().fg(title_fg).add_modifier(active_mod)),
-        ),
-    ];
+    let bg_default = ctx.apply_bg(Style::default());
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(8);
+    spans.push(Span::styled("│", ctx.border_style));
+    spans.push(Span::styled(" ", bg_default));
+    spans.push(Span::styled(
+        icon.to_string(),
+        ctx.apply_bg(Style::default().fg(icon_color)),
+    ));
+    spans.push(Span::styled(
+        format!(" {}", title),
+        ctx.apply_bg(Style::default().fg(title_fg).add_modifier(active_mod)),
+    ));
     if !badge.is_empty() {
         let badge_color = match pane.permission_mode {
             PermissionMode::BypassPermissions => theme.badge_danger,
@@ -120,13 +120,13 @@ fn status_row(
         };
         spans.push(Span::styled(
             format!(" {}", badge),
-            apply_bg(Style::default().fg(badge_color)),
+            ctx.apply_bg(Style::default().fg(badge_color)),
         ));
     }
-    spans.push(Span::styled(padding, apply_bg(Style::default())));
+    spans.push(Span::styled(padding, bg_default));
     spans.push(Span::styled(
         elapsed,
-        apply_bg(Style::default().fg(elapsed_fg)),
+        ctx.apply_bg(Style::default().fg(elapsed_fg)),
     ));
     spans.push(Span::styled("│", ctx.border_style));
     Line::from(spans)
@@ -142,14 +142,12 @@ fn branch_ports_row(
         if ports.is_empty() {
             return None;
         }
-        let mut port_list = String::new();
-        for (i, port) in ports.iter().enumerate() {
-            if i > 0 {
-                port_list.push_str(", ");
-            }
-            port_list.push_str(&port.to_string());
-        }
-        Some(format!(":{}", port_list))
+        let joined = ports
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!(":{}", joined))
     });
 
     if branch.is_empty() && port_text.is_none() {
@@ -157,49 +155,42 @@ fn branch_ports_row(
     }
 
     let theme = ctx.theme;
-    let apply_bg = ctx.apply_bg;
-    let branch_color = theme.branch;
-
     let left_prefix = "  ";
     let right_prefix = "  ";
-    let right_text = port_text.unwrap_or_default();
-    let right_width = if right_text.is_empty() {
-        0
-    } else {
-        display_width(right_prefix) + display_width(&right_text)
-    };
-    let left_room = ctx.inner_width.saturating_sub(right_width);
-    let max_branch_width = left_room.saturating_sub(display_width(left_prefix));
-    let truncated_branch = truncate_to_width(&branch, max_branch_width);
-    let left_text = format!("{}{}", left_prefix, truncated_branch);
-    let left_width = display_width(&left_text);
 
-    let mut left_spans: Vec<Span<'static>> = vec![Span::styled(
-        left_text,
-        apply_bg(Style::default().fg(branch_color)),
-    )];
-    if branch.is_empty() {
-        left_spans.clear();
-    }
-    let right_spans: Vec<Span<'static>> = if right_text.is_empty() {
-        vec![]
-    } else {
-        vec![Span::styled(
-            format!("{}{}", right_prefix, right_text),
-            apply_bg(Style::default().fg(theme.port)),
-        )]
+    let (right_spans, right_width) = match &port_text {
+        Some(text) => {
+            let display = format!("{}{}", right_prefix, text);
+            let width = display_width(&display);
+            (
+                vec![Span::styled(
+                    display,
+                    ctx.apply_bg(Style::default().fg(theme.port)),
+                )],
+                width,
+            )
+        }
+        None => (vec![], 0),
     };
-    let left_width = if branch.is_empty() { 0 } else { left_width };
 
-    Some(bordered_split_line(
-        ctx.border_style,
-        apply_bg,
-        ctx.inner_width,
-        left_spans,
-        left_width,
-        right_spans,
-        right_width,
-    ))
+    let (left_spans, left_width) = if branch.is_empty() {
+        (vec![], 0)
+    } else {
+        let left_room = ctx.inner_width.saturating_sub(right_width);
+        let max_branch_width = left_room.saturating_sub(display_width(left_prefix));
+        let truncated = truncate_to_width(&branch, max_branch_width);
+        let text = format!("{}{}", left_prefix, truncated);
+        let width = display_width(&text);
+        (
+            vec![Span::styled(
+                text,
+                ctx.apply_bg(Style::default().fg(theme.branch)),
+            )],
+            width,
+        )
+    };
+
+    Some(ctx.bordered_split(left_spans, left_width, right_spans, right_width))
 }
 
 fn task_progress_row(
@@ -212,7 +203,7 @@ fn task_progress_row(
         return None;
     }
 
-    let mut icons = String::new();
+    let mut icons = String::with_capacity(progress.tasks.len() * 3);
     for (_, status) in &progress.tasks {
         let ch = match status {
             TaskStatus::Completed => "✔",
@@ -229,28 +220,24 @@ fn task_progress_row(
     );
     let summary_dw = display_width(&summary);
     let task_color = ctx.theme.task_progress;
-    Some(bordered_line(
-        ctx.border_style,
-        ctx.apply_bg,
-        ctx.inner_width,
+    Some(ctx.bordered(
         vec![Span::styled(
             summary,
-            (ctx.apply_bg)(Style::default().fg(task_color)),
+            ctx.apply_bg(Style::default().fg(task_color)),
         )],
         summary_dw,
     ))
 }
 
 fn subagent_rows(subagents: &[String], ctx: &RowCtx) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
     if subagents.is_empty() {
-        return out;
+        return Vec::new();
     }
     let theme = ctx.theme;
-    let apply_bg = ctx.apply_bg;
     let subagent_color = theme.subagent;
     let tree_color = theme.text_muted;
     let last_idx = subagents.len() - 1;
+    let mut out = Vec::with_capacity(subagents.len());
     for (i, sa) in subagents.iter().enumerate() {
         let connector = if i == last_idx { "└ " } else { "├ " };
         let numbered = if sa.contains('#') {
@@ -263,13 +250,13 @@ fn subagent_rows(subagents: &[String], ctx: &RowCtx) -> Vec<Line<'static>> {
         let max_sa_w = ctx.inner_width.saturating_sub(prefix_dw);
         let truncated_sa = truncate_to_width(&numbered, max_sa_w);
         let text_dw = prefix_dw + display_width(&truncated_sa);
-        out.push(bordered_line(
-            ctx.border_style,
-            apply_bg,
-            ctx.inner_width,
+        out.push(ctx.bordered(
             vec![
-                Span::styled(prefix, apply_bg(Style::default().fg(tree_color))),
-                Span::styled(truncated_sa, apply_bg(Style::default().fg(subagent_color))),
+                Span::styled(prefix, ctx.apply_bg(Style::default().fg(tree_color))),
+                Span::styled(
+                    truncated_sa,
+                    ctx.apply_bg(Style::default().fg(subagent_color)),
+                ),
             ],
             text_dw,
         ));
@@ -289,56 +276,48 @@ fn wait_reason_row(wait_reason: &str, status: &PaneStatus, ctx: &RowCtx) -> Opti
     } else {
         ctx.theme.wait_reason
     };
-    Some(bordered_line(
-        ctx.border_style,
-        ctx.apply_bg,
-        ctx.inner_width,
+    Some(ctx.bordered(
         vec![Span::styled(
             text,
-            (ctx.apply_bg)(Style::default().fg(reason_color)),
+            ctx.apply_bg(Style::default().fg(reason_color)),
         )],
         text_dw,
     ))
 }
 
 fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>> {
-    let mut out = Vec::new();
-    let apply_bg = ctx.apply_bg;
     let theme = ctx.theme;
-
     let is_response = pane.prompt_is_response;
     let prompt_color = if ctx.active {
         theme.text_active
     } else {
         theme.text_muted
     };
-    let display_prompt = pane.prompt.clone();
     let wrap_width = ctx
         .inner_width
         .saturating_sub(if is_response { 4 } else { 2 });
     let wrapped = if is_response {
-        wrap_text_char(&display_prompt, wrap_width, 3)
+        wrap_text_char(&pane.prompt, wrap_width, 3)
     } else {
-        wrap_text(&display_prompt, wrap_width, 3)
+        wrap_text(&pane.prompt, wrap_width, 3)
     };
+
+    let mut out = Vec::with_capacity(wrapped.len());
     for (li, wl) in wrapped.iter().enumerate() {
         if is_response && li == 0 {
             let arrow_color = theme.response_arrow;
-            let text_dw = 4 + display_width(wl); // "  ▶ " + text
-            out.push(bordered_line(
-                ctx.border_style,
-                apply_bg,
-                ctx.inner_width,
+            let text_dw = 4 + display_width(wl); // "  ▶ " width
+            out.push(ctx.bordered(
                 vec![
                     Span::styled(
                         "  ▶ ",
-                        apply_bg(
+                        ctx.apply_bg(
                             Style::default()
                                 .fg(arrow_color)
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ),
-                    Span::styled(wl.clone(), apply_bg(Style::default().fg(prompt_color))),
+                    Span::styled(wl.clone(), ctx.apply_bg(Style::default().fg(prompt_color))),
                 ],
                 text_dw,
             ));
@@ -346,13 +325,10 @@ fn prompt_rows(pane: &crate::tmux::PaneInfo, ctx: &RowCtx) -> Vec<Line<'static>>
             let indent = if is_response { "    " } else { "  " };
             let text = format!("{}{}", indent, wl);
             let text_dw = display_width(&text);
-            out.push(bordered_line(
-                ctx.border_style,
-                apply_bg,
-                ctx.inner_width,
+            out.push(ctx.bordered(
                 vec![Span::styled(
                     text,
-                    apply_bg(Style::default().fg(prompt_color)),
+                    ctx.apply_bg(Style::default().fg(prompt_color)),
                 )],
                 text_dw,
             ));
@@ -369,13 +345,10 @@ fn idle_hint_row(ctx: &RowCtx) -> Line<'static> {
     } else {
         ctx.theme.text_muted
     };
-    bordered_line(
-        ctx.border_style,
-        ctx.apply_bg,
-        ctx.inner_width,
+    ctx.bordered(
         vec![Span::styled(
             text.to_string(),
-            (ctx.apply_bg)(Style::default().fg(idle_color)),
+            ctx.apply_bg(Style::default().fg(idle_color)),
         )],
         text_dw,
     )
@@ -386,7 +359,6 @@ pub(super) fn render_pane_lines_with_ports(
     pane: &crate::tmux::PaneInfo,
     git_info: &crate::group::PaneGitInfo,
     ports: Option<&[u16]>,
-    _command: Option<&str>,
     task_progress: Option<&crate::activity::TaskProgress>,
     selected: bool,
     active: bool,
@@ -397,26 +369,19 @@ pub(super) fn render_pane_lines_with_ports(
     spinner_frame: usize,
     now: u64,
 ) -> Vec<Line<'static>> {
-    let border_style = Style::default().fg(border_color);
-    let inner_width = width.saturating_sub(3);
-    let bg = if selected {
-        Some(theme.selection_bg)
-    } else {
-        None
-    };
-    let apply_bg = move |s: Style| match bg {
-        Some(c) => s.bg(c),
-        None => s,
-    };
     let ctx = RowCtx {
-        border_style,
-        inner_width,
+        border_style: Style::default().fg(border_color),
+        inner_width: width.saturating_sub(3),
         theme,
-        apply_bg: &apply_bg,
+        bg: if selected {
+            Some(theme.selection_bg)
+        } else {
+            None
+        },
         active,
     };
 
-    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(8);
     out.push(status_row(pane, &ctx, icons, spinner_frame, now));
     if let Some(line) = branch_ports_row(git_info, ports, &ctx) {
         out.push(line);
@@ -496,18 +461,12 @@ mod tests {
             .collect()
     }
 
-    /// Convenience: build a RowCtx bound to a no-op background for unit tests.
-    fn test_ctx<'a>(
-        theme: &'a ColorTheme,
-        inner_width: usize,
-        active: bool,
-        apply_bg: &'a dyn Fn(Style) -> Style,
-    ) -> RowCtx<'a> {
+    fn test_ctx<'a>(theme: &'a ColorTheme, inner_width: usize, active: bool) -> RowCtx<'a> {
         RowCtx {
             border_style: Style::default().fg(theme.border_active),
             inner_width,
             theme,
-            apply_bg,
+            bg: None,
             active,
         }
     }
@@ -519,7 +478,6 @@ mod tests {
         let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
-            None,
             None,
             None,
             false,
@@ -551,7 +509,6 @@ mod tests {
             },
             Some(&ports),
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -570,31 +527,6 @@ mod tests {
     }
 
     #[test]
-    fn render_pane_lines_shows_command_row() {
-        let theme = ColorTheme::default();
-        let mut pane = pane(PermissionMode::Default, PaneStatus::Running, "");
-        pane.current_command = "npm run dev -- --port 3000".into();
-        let lines = render_pane_lines_with_ports(
-            &pane,
-            &PaneGitInfo::default(),
-            None,
-            Some("npm run dev -- --port 3000"),
-            None,
-            false,
-            false,
-            theme.border_active,
-            40,
-            &StatusIcons::default(),
-            &theme,
-            0,
-            0,
-        );
-
-        assert_eq!(lines.len(), 1);
-        assert!(lines.iter().all(|line| !line_text(line).contains("cmd:")));
-    }
-
-    #[test]
     fn render_pane_lines_truncates_long_branch_when_ports_present() {
         let theme = ColorTheme::default();
         let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
@@ -608,7 +540,6 @@ mod tests {
                 worktree_name: None,
             },
             Some(&ports),
-            None,
             None,
             false,
             false,
@@ -641,7 +572,6 @@ mod tests {
         let lines = render_pane_lines_with_ports(
             &pane,
             &PaneGitInfo::default(),
-            None,
             None,
             None,
             false,
@@ -686,7 +616,6 @@ mod tests {
             &PaneGitInfo::default(),
             None,
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -715,7 +644,6 @@ mod tests {
             &PaneGitInfo::default(),
             None,
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -742,7 +670,6 @@ mod tests {
             &PaneGitInfo::default(),
             None,
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -753,7 +680,6 @@ mod tests {
             0,
         );
 
-        // status + subagent + prompt = 3 lines minimum
         assert!(lines.len() >= 3);
         let sub_line = line_text(&lines[1]);
         assert!(sub_line.contains("└ "));
@@ -770,7 +696,6 @@ mod tests {
             &PaneGitInfo::default(),
             None,
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -781,7 +706,6 @@ mod tests {
             0,
         );
 
-        // status + 3 subagents + prompt = 5 lines minimum
         assert!(lines.len() >= 5);
         assert!(line_text(&lines[1]).contains("├ "));
         assert!(line_text(&lines[1]).contains("Explore #1"));
@@ -802,7 +726,6 @@ mod tests {
             &PaneGitInfo::default(),
             None,
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -813,7 +736,6 @@ mod tests {
             0,
         );
 
-        // status + subagent + wait_reason + idle hint = 4
         assert!(lines.len() >= 3);
         let sub_line = line_text(&lines[1]);
         assert!(sub_line.contains("Explore #1"));
@@ -835,7 +757,6 @@ mod tests {
             &PaneGitInfo::default(),
             None,
             None,
-            None,
             false,
             false,
             theme.border_active,
@@ -855,18 +776,15 @@ mod tests {
     #[test]
     fn render_pane_lines_response_uses_char_wrap() {
         let theme = ColorTheme::default();
-        // Long response that would word-wrap at spaces but should char-wrap instead
         let p = pane_with_response(
             PermissionMode::Default,
             PaneStatus::Idle,
             "abcdef ghijk lmnop qrstu vwxyz",
             true,
         );
-        // Width 20: inner_width=17, prefix=4, so wrap at 13 chars
         let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
-            None,
             None,
             None,
             false,
@@ -880,11 +798,9 @@ mod tests {
         );
 
         assert!(lines.len() >= 2);
-        // First line has ▶ + start of text
         let first = line_text(&lines[1]);
         assert!(first.contains("▶"));
-        // Second line should NOT have trimmed spaces (char-wrap, not word-wrap)
-        // With word-wrap "abcdef ghijk " would break at "ghijk", char-wrap fills fully
+        // char-wrap must not trim inter-word spaces like word-wrap does
         let second = line_text(&lines[2]);
         assert!(!second.starts_with("│  ghijk"));
     }
@@ -896,7 +812,6 @@ mod tests {
         let lines = render_pane_lines_with_ports(
             &p,
             &PaneGitInfo::default(),
-            None,
             None,
             None,
             false,
@@ -931,7 +846,6 @@ mod tests {
             &p,
             &PaneGitInfo::default(),
             None,
-            None,
             Some(&progress),
             false,
             false,
@@ -943,7 +857,6 @@ mod tests {
             0,
         );
 
-        // status + task progress + idle hint = 3 lines
         assert!(lines.len() >= 2);
         let task_line = line_text(&lines[1]);
         assert!(task_line.contains("✔◼◻"));
@@ -960,7 +873,6 @@ mod tests {
             &p,
             &PaneGitInfo::default(),
             None,
-            None,
             Some(&progress),
             false,
             false,
@@ -972,86 +884,32 @@ mod tests {
             0,
         );
 
-        // Should not have task line, just status + idle hint
         assert_eq!(lines.len(), 2);
         let hint = line_text(&lines[1]);
         assert!(hint.contains("Waiting for prompt"));
     }
 
-    // ─── Row-level unit tests (added during decomposition) ──────
-
     #[test]
-    fn branch_ports_row_returns_none_when_branch_and_ports_empty() {
+    fn branch_ports_row_renders_port_only_without_branch() {
         let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
-        let result = branch_ports_row(&PaneGitInfo::default(), None, &ctx);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn branch_ports_row_returns_some_when_only_ports() {
-        let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
+        let ctx = test_ctx(&theme, 40, false);
         let ports = vec![3000];
-        let result = branch_ports_row(&PaneGitInfo::default(), Some(&ports), &ctx);
-        let line = result.expect("should render port line");
-        let text = line_text(&line);
-        assert!(text.contains(":3000"));
-    }
-
-    #[test]
-    fn subagent_rows_empty_returns_empty_vec() {
-        let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
-        let rows = subagent_rows(&[], &ctx);
-        assert!(rows.is_empty());
-    }
-
-    #[test]
-    fn wait_reason_row_empty_returns_none() {
-        let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
-        let result = wait_reason_row("", &PaneStatus::Waiting, &ctx);
-        assert!(result.is_none());
+        let line = branch_ports_row(&PaneGitInfo::default(), Some(&ports), &ctx)
+            .expect("should render port line");
+        assert!(line_text(&line).contains(":3000"));
     }
 
     #[test]
     fn wait_reason_row_uses_error_color_when_status_is_error() {
         let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
+        let ctx = test_ctx(&theme, 40, false);
         let line = wait_reason_row("permission_prompt", &PaneStatus::Error, &ctx)
             .expect("should render reason line");
-        // The colored content span is the second (index=2): border, space, text
         let text_span = line
             .spans
             .iter()
             .find(|s| s.content.contains("permission"))
             .expect("reason text should be present");
         assert_eq!(text_span.style.fg, Some(theme.status_error));
-    }
-
-    #[test]
-    fn task_progress_row_none_when_progress_empty() {
-        use crate::activity::TaskProgress;
-        let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
-        let progress = TaskProgress { tasks: vec![] };
-        assert!(task_progress_row(Some(&progress), &ctx).is_none());
-        assert!(task_progress_row(None, &ctx).is_none());
-    }
-
-    #[test]
-    fn idle_hint_row_contains_waiting_text() {
-        let theme = ColorTheme::default();
-        let noop: &dyn Fn(Style) -> Style = &|s: Style| s;
-        let ctx = test_ctx(&theme, 40, false, noop);
-        let line = idle_hint_row(&ctx);
-        assert!(line_text(&line).contains("Waiting for prompt"));
     }
 }
