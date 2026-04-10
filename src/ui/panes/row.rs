@@ -912,4 +912,105 @@ mod tests {
             .expect("reason text should be present");
         assert_eq!(text_span.style.fg, Some(theme.status_error));
     }
+
+    #[test]
+    fn render_pane_lines_selected_applies_background_to_spans() {
+        let theme = ColorTheme::default();
+        let pane = pane(PermissionMode::Auto, PaneStatus::Running, "do work");
+        let lines = render_pane_lines_with_ports(
+            &pane,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            true, // selected
+            false,
+            theme.border_active,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        // Every inner (non-border) span on the status line must carry the selection bg.
+        // Borders "│" use border_style only and keep bg = None.
+        let status = &lines[0];
+        let has_bg = status
+            .spans
+            .iter()
+            .any(|s| s.style.bg == Some(theme.selection_bg));
+        assert!(
+            has_bg,
+            "selected row should apply selection_bg to inner spans"
+        );
+    }
+
+    #[test]
+    fn render_pane_lines_active_bolds_agent_title() {
+        let theme = ColorTheme::default();
+        let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
+        let lines = render_pane_lines_with_ports(
+            &pane,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            true, // active
+            theme.border_active,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        let title_span = lines[0]
+            .spans
+            .iter()
+            .find(|s| s.content.contains("codex"))
+            .expect("title span should be present");
+        assert!(
+            title_span.style.add_modifier.contains(Modifier::BOLD),
+            "active pane title should be BOLD"
+        );
+    }
+
+    #[test]
+    fn status_row_default_permission_mode_omits_badge() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 40, false);
+        let pane = pane(PermissionMode::Default, PaneStatus::Running, "");
+        let line = status_row(&pane, &ctx, &StatusIcons::default(), 0, 0);
+        let text = line_text(&line);
+        // Default mode has an empty badge string — no extra badge token should appear.
+        assert!(
+            !text.contains(" auto") && !text.contains(" plan") && !text.contains(" !"),
+            "default permission mode should not render a badge, got: {text}"
+        );
+    }
+
+    #[test]
+    fn prompt_rows_indents_continuation_lines() {
+        let theme = ColorTheme::default();
+        let ctx = test_ctx(&theme, 20, false);
+        let mut p = pane(
+            PermissionMode::Default,
+            PaneStatus::Running,
+            "aaaa bbbb cccc dddd eeee",
+        );
+        p.prompt_is_response = false;
+        let lines = prompt_rows(&p, &ctx);
+        assert!(
+            lines.len() >= 2,
+            "expected prompt to wrap across multiple lines"
+        );
+        for line in &lines {
+            let text = line_text(line);
+            // Each line must start "│  " (border + 2-space indent).
+            assert!(
+                text.starts_with("│  "),
+                "each wrapped line should carry the 2-space indent, got: {text}"
+            );
+        }
+    }
 }

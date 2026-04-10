@@ -319,3 +319,82 @@ fn test_agents_auto_scroll_up_shows_group_header() {
         "group header should be visible when first agent is selected"
     );
 }
+
+// ─── Repo popup rendering ───────────────────────────────────────────
+
+#[test]
+fn repo_popup_renders_repo_names_when_open() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "frontend".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![
+        make_repo_group("frontend", vec![pane.clone()]),
+        make_repo_group("backend", vec![pane.clone()]),
+    ];
+    state.rebuild_row_targets();
+    state.repo_popup_open = true;
+
+    let output = render_to_string(&mut state, 40, 30);
+    assert!(output.contains("All"), "popup should list 'All' entry");
+    assert!(
+        output.contains("frontend"),
+        "popup should list frontend repo"
+    );
+    assert!(output.contains("backend"), "popup should list backend repo");
+    assert!(
+        state.repo_popup_area.is_some(),
+        "render should populate repo_popup_area for hit-testing"
+    );
+}
+
+#[test]
+fn repo_popup_highlights_selected_entry_with_background() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "frontend".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![
+        make_repo_group("frontend", vec![pane.clone()]),
+        make_repo_group("backend", vec![pane.clone()]),
+    ];
+    state.rebuild_row_targets();
+    state.sidebar_focused = false; // surface raw colors instead of REVERSED
+    state.repo_popup_open = true;
+    state.repo_popup_selected = 2; // "backend" (0=All, 1=frontend, 2=backend)
+
+    let styled = render_to_styled_string(&mut state, 40, 30);
+    // The highlighted row should carry the selection background.
+    // render_to_styled_string interleaves style annotations between glyphs, so
+    // "backend" never appears as a contiguous substring — match on the styled
+    // bytes of each character ("b[fg:...,bg:237,bold]") to detect the selected
+    // row precisely.
+    let theme = &state.theme;
+    let bg_idx = match theme.selection_bg {
+        ratatui::style::Color::Indexed(n) => n,
+        _ => panic!("selection_bg should be an indexed color in the default theme"),
+    };
+    let bg_marker = format!("bg:{bg_idx}");
+    let selected_line = styled
+        .lines()
+        .find(|l| {
+            l.contains(&format!("b[fg:255,{bg_marker},bold]"))
+                && l.contains(&format!("d[fg:255,{bg_marker},bold]"))
+        })
+        .expect("popup should render 'backend' with selection_bg and bold");
+    assert!(selected_line.contains("bold"));
+}
