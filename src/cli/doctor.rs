@@ -12,6 +12,46 @@ const _CLAUDE_TABLE_REACHABLE: &[HookRegistration] = ClaudeAdapter::HOOK_REGISTR
 #[allow(dead_code)]
 const _CODEX_TABLE_REACHABLE: &[HookRegistration] = CodexAdapter::HOOK_REGISTRATIONS;
 
+/// POSIX-quote a string for safe use as a single shell argument.
+///
+/// Fast path: when the string consists only of characters that bash does
+/// not interpret specially, it is returned as-is. This matters for the
+/// common case (`/Users/alice/.../hook.sh`) because aggressive quoting
+/// would suppress tilde expansion on the fallback path
+/// `~/.tmux/plugins/tmux-agent-sidebar/hook.sh` and break the emitted
+/// hook commands. This mirrors Python's `shlex.quote` behaviour.
+///
+/// Slow path: wrap the value in single quotes and escape any internal
+/// single quotes as `'\''`. Safe for paths containing spaces, `$`, `;`,
+/// backticks, and other shell metacharacters.
+fn shell_quote(s: &str) -> String {
+    fn is_safe(c: char) -> bool {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '/' | '-' | '_' | '.' | '~' | '+' | '=' | ',' | '@' | ':')
+    }
+    if !s.is_empty() && s.chars().all(is_safe) {
+        return s.to_string();
+    }
+
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// Build the `bash <hook_script> <agent> <event>` command string with
+/// proper POSIX quoting so arbitrary installation paths are safe.
+fn format_hook_command(hook_script: &str, agent: &str, event: &str) -> String {
+    format!("bash {} {} {}", shell_quote(hook_script), agent, event)
+}
+
 /// Build the ready-to-paste `{ "hooks": { ... } }` JSON block for a single
 /// agent. Returns `None` for unknown agent names.
 ///
@@ -29,12 +69,7 @@ pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serd
     let mut hooks = serde_json::Map::new();
     for reg in table {
         let matcher = reg.matcher.unwrap_or("");
-        let command = format!(
-            "bash {} {} {}",
-            hook_script,
-            agent,
-            reg.kind.external_name()
-        );
+        let command = format_hook_command(hook_script, agent, reg.kind.external_name());
         let entry = serde_json::json!({
             "matcher": matcher,
             "hooks": [
@@ -90,12 +125,7 @@ fn build_agent_entry(
     let hooks: Vec<serde_json::Value> = table
         .iter()
         .map(|reg| {
-            let command = format!(
-                "bash {} {} {}",
-                hook_script,
-                agent,
-                reg.kind.external_name()
-            );
+            let command = format_hook_command(hook_script, agent, reg.kind.external_name());
             serde_json::json!({
                 "trigger": reg.trigger,
                 "matcher": match reg.matcher {
@@ -118,6 +148,19 @@ fn build_agent_entry(
     })
 }
 
+/// Result of attempting to locate `hook.sh` relative to the running binary.
+/// The `detected` flag is `false` when the resolver could not find an
+/// actual file on disk and had to return the README fallback — callers
+/// should warn the user in that case because the emitted commands will be
+/// wrong for non-default installs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedHookScript {
+    pub path: String,
+    pub detected: bool,
+}
+
+const FALLBACK_HOOK_SCRIPT: &str = "~/.tmux/plugins/tmux-agent-sidebar/hook.sh";
+
 /// Resolve the absolute path of `hook.sh` to embed in the generated
 /// commands. Strategy:
 ///
@@ -130,27 +173,37 @@ fn build_agent_entry(
 /// 3. Fallback: the literal string `~/.tmux/plugins/tmux-agent-sidebar/hook.sh`
 ///    (tilde intentionally not expanded, matches README).
 ///
-/// Never panics.
-fn resolve_hook_script() -> String {
-    const FALLBACK: &str = "~/.tmux/plugins/tmux-agent-sidebar/hook.sh";
+/// When step 1 or 2 succeeds, `detected = true`. When step 3 kicks in,
+/// `detected = false` and `cmd_doctor` surfaces a stderr warning. Never
+/// panics.
+fn resolve_hook_script() -> ResolvedHookScript {
+    fn fallback() -> ResolvedHookScript {
+        ResolvedHookScript {
+            path: FALLBACK_HOOK_SCRIPT.to_string(),
+            detected: false,
+        }
+    }
 
     let Ok(exe) = std::env::current_exe() else {
-        return FALLBACK.to_string();
+        return fallback();
     };
     let Some(mut dir) = exe.parent().map(|p| p.to_path_buf()) else {
-        return FALLBACK.to_string();
+        return fallback();
     };
     for _ in 0..=3 {
         let candidate = dir.join("hook.sh");
         if candidate.is_file() {
-            return candidate.to_string_lossy().into_owned();
+            return ResolvedHookScript {
+                path: candidate.to_string_lossy().into_owned(),
+                detected: true,
+            };
         }
         match dir.parent() {
             Some(parent) => dir = parent.to_path_buf(),
             None => break,
         }
     }
-    FALLBACK.to_string()
+    fallback()
 }
 
 /// Pure dispatch core. Returns the exit code and the JSON to print
@@ -177,8 +230,16 @@ fn run_doctor(args: &[String], hook_script: &str) -> (i32, Option<serde_json::Va
 }
 
 pub(crate) fn cmd_doctor(args: &[String]) -> i32 {
-    let hook_script = resolve_hook_script();
-    let (code, json) = run_doctor(args, &hook_script);
+    let resolved = resolve_hook_script();
+    if !resolved.detected {
+        eprintln!(
+            "warning: could not locate hook.sh relative to the running \
+             binary; using fallback path {:?}. If your installation lives \
+             elsewhere, hand-edit the 'command' values before pasting.",
+            resolved.path
+        );
+    }
+    let (code, json) = run_doctor(args, &resolved.path);
     if let Some(v) = json {
         match serde_json::to_string_pretty(&v) {
             Ok(s) => println!("{}", s),
@@ -197,6 +258,103 @@ mod tests {
     use serde_json::{Value, json};
 
     const FAKE_HOOK: &str = "/fake/hook.sh";
+
+    #[test]
+    fn shell_quote_safe_string_passes_through() {
+        // Fast path: common paths have no shell-special characters and are
+        // returned verbatim. This is what keeps the fallback
+        // `~/.tmux/plugins/tmux-agent-sidebar/hook.sh` eligible for tilde
+        // expansion in the generated command.
+        assert_eq!(shell_quote("hello"), "hello");
+        assert_eq!(shell_quote("/fake/hook.sh"), "/fake/hook.sh");
+        assert_eq!(
+            shell_quote("~/.tmux/plugins/tmux-agent-sidebar/hook.sh"),
+            "~/.tmux/plugins/tmux-agent-sidebar/hook.sh"
+        );
+        assert_eq!(
+            shell_quote("/Users/alice/.tmux/plugins/tmux-agent-sidebar/hook.sh"),
+            "/Users/alice/.tmux/plugins/tmux-agent-sidebar/hook.sh"
+        );
+    }
+
+    #[test]
+    fn shell_quote_empty_string_is_quoted() {
+        // Empty arg must survive as `''`, otherwise it vanishes from argv.
+        assert_eq!(shell_quote(""), "''");
+    }
+
+    #[test]
+    fn shell_quote_path_with_spaces() {
+        assert_eq!(shell_quote("/Users/a b/hook.sh"), "'/Users/a b/hook.sh'");
+    }
+
+    #[test]
+    fn shell_quote_embedded_single_quote() {
+        // POSIX trick: 'a'\''b' = literal `a'b`.
+        assert_eq!(shell_quote("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn shell_quote_shell_metacharacters() {
+        // `$`, backticks, `;`, `|` must all be neutralized inside single quotes.
+        assert_eq!(shell_quote("$(rm -rf /)"), "'$(rm -rf /)'");
+        assert_eq!(shell_quote("a;b|c`d`"), "'a;b|c`d`'");
+    }
+
+    #[test]
+    fn format_hook_command_leaves_safe_path_unquoted() {
+        let cmd = format_hook_command("/fake/hook.sh", "claude", "session-start");
+        assert_eq!(cmd, "bash /fake/hook.sh claude session-start");
+    }
+
+    #[test]
+    fn format_hook_command_quotes_unsafe_path() {
+        let cmd = format_hook_command("/path with space/hook.sh", "claude", "session-start");
+        assert_eq!(cmd, "bash '/path with space/hook.sh' claude session-start");
+    }
+
+    #[test]
+    fn snippet_path_with_spaces_is_safely_quoted() {
+        // Paths with spaces must survive the JSON round-trip as a quoted
+        // single shell token. Before the fix, this produced
+        // `bash /path with/hook.sh claude session-start` which `bash` would
+        // parse as four arguments.
+        let v = build_agent_snippet("claude", "/path with spaces/hook.sh").unwrap();
+        let cmd = v
+            .pointer("/hooks/SessionStart/0/hooks/0/command")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_eq!(cmd, "bash '/path with spaces/hook.sh' claude session-start");
+    }
+
+    #[test]
+    fn snippet_path_with_single_quote_is_escaped() {
+        let v = build_agent_snippet("claude", "/weird'path/hook.sh").unwrap();
+        let cmd = v
+            .pointer("/hooks/SessionStart/0/hooks/0/command")
+            .and_then(Value::as_str)
+            .unwrap();
+        assert_eq!(cmd, "bash '/weird'\\''path/hook.sh' claude session-start");
+    }
+
+    #[test]
+    fn resolve_hook_script_fallback_when_binary_has_no_sibling() {
+        // We cannot pin current_exe() in a unit test, but we can verify the
+        // FALLBACK constant is what the resolver returns as its `path` field
+        // when `detected = false`, by exercising the branch indirectly: any
+        // `ResolvedHookScript` whose `detected` flag is false MUST use the
+        // documented fallback string so cmd_doctor's warning points somewhere
+        // meaningful.
+        let resolved = resolve_hook_script();
+        if !resolved.detected {
+            assert_eq!(resolved.path, FALLBACK_HOOK_SCRIPT);
+        }
+        // When detected is true, we at least verify the file exists on disk
+        // (otherwise the resolver lied).
+        if resolved.detected {
+            assert!(std::path::Path::new(&resolved.path).is_file());
+        }
+    }
 
     #[test]
     fn snippet_unknown_agent_returns_none() {
