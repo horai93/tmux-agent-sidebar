@@ -484,10 +484,7 @@ mod tests {
 
     #[test]
     fn remove_subagent_single_item() {
-        assert_eq!(
-            remove_subagent("Explore:sub-1", "sub-1"),
-            Some("".into())
-        );
+        assert_eq!(remove_subagent("Explore:sub-1", "sub-1"), Some("".into()));
     }
 
     #[test]

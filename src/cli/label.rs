@@ -33,9 +33,8 @@ pub(crate) fn extract_tool_label(
                 .get("content")
                 .and_then(|c| c.as_array())
                 .and_then(|arr| {
-                    arr.iter().find(|block| {
-                        block.get("type").and_then(|t| t.as_str()) == Some("text")
-                    })
+                    arr.iter()
+                        .find(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
                 })
                 .and_then(|block| block.get("text"))
                 .and_then(|v| v.as_str())
