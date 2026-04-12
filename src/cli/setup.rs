@@ -87,6 +87,96 @@ pub(crate) fn build_agent_snippet(agent: &str, hook_script: &str) -> Option<serd
     Some(serde_json::json!({ "hooks": serde_json::Value::Object(hooks) }))
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct HookSpec {
+    trigger: String,
+    matcher: String,
+    command: String,
+}
+
+#[allow(dead_code)]
+fn normalize_matcher(value: Option<&serde_json::Value>) -> String {
+    value.and_then(|v| v.as_str()).unwrap_or("").to_string()
+}
+
+#[allow(dead_code)]
+fn collect_hook_specs(config: &serde_json::Value) -> Vec<HookSpec> {
+    let Some(hooks) = config.get("hooks").and_then(serde_json::Value::as_object) else {
+        return Vec::new();
+    };
+
+    let mut specs = Vec::new();
+    for (trigger, entries) in hooks {
+        let Some(entries) = entries.as_array() else {
+            continue;
+        };
+        for entry in entries {
+            let matcher = normalize_matcher(entry.get("matcher"));
+            let Some(actions) = entry.get("hooks").and_then(serde_json::Value::as_array) else {
+                continue;
+            };
+            for action in actions {
+                if action.get("type").and_then(serde_json::Value::as_str) != Some("command") {
+                    continue;
+                }
+                let command = action
+                    .get("command")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                specs.push(HookSpec {
+                    trigger: trigger.clone(),
+                    matcher: matcher.clone(),
+                    command,
+                });
+            }
+        }
+    }
+
+    specs
+}
+
+/// Return the trigger names that are required by `agent` but missing from
+/// `current_config`.
+///
+/// The comparison uses the same hook shape that `setup` emits: `trigger`,
+/// `matcher`, and the command string. `matcher` normalizes `null`, missing,
+/// and `""` to the same empty matcher.
+#[allow(dead_code)]
+pub(crate) fn missing_hooks(
+    agent: &str,
+    current_config: &serde_json::Value,
+    hook_script: &str,
+) -> Vec<String> {
+    let Some(expected) = build_agent_snippet(agent, hook_script) else {
+        return Vec::new();
+    };
+
+    let expected = collect_hook_specs(&expected);
+    let actual = collect_hook_specs(current_config);
+    let actual: std::collections::HashSet<HookSpec> = actual.into_iter().collect();
+
+    let mut missing = Vec::new();
+    let mut seen_triggers = std::collections::BTreeSet::new();
+    for spec in expected {
+        if actual.contains(&spec) || !seen_triggers.insert(spec.trigger.clone()) {
+            continue;
+        }
+        missing.push(spec.trigger);
+    }
+    missing
+}
+
+#[allow(dead_code)]
+pub(crate) fn has_missing_hooks(
+    agent: &str,
+    current_config: &serde_json::Value,
+    hook_script: &str,
+) -> bool {
+    !missing_hooks(agent, current_config, hook_script).is_empty()
+}
+
 /// Build the full setup output: version, resolved hook script path,
 /// and a per-agent object containing `config_path`, the normalized
 /// `hooks[]` array, and the ready-to-paste `snippet`.
@@ -448,6 +538,149 @@ mod tests {
                 reg.trigger
             );
         }
+    }
+
+    #[test]
+    fn missing_hooks_is_empty_for_matching_claude_config() {
+        let config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
+        assert!(missing_hooks("claude", &config, FAKE_HOOK).is_empty());
+        assert!(!has_missing_hooks("claude", &config, FAKE_HOOK));
+    }
+
+    #[test]
+    fn missing_hooks_reports_removed_trigger() {
+        let mut config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .expect("top-level hooks object");
+        hooks.remove("SessionEnd");
+
+        assert_eq!(
+            missing_hooks("claude", &config, FAKE_HOOK),
+            vec!["SessionEnd".to_string()]
+        );
+        assert!(has_missing_hooks("claude", &config, FAKE_HOOK));
+    }
+
+    #[test]
+    fn missing_hooks_treats_matcher_and_command_changes_as_missing() {
+        let mut config = build_agent_snippet("codex", FAKE_HOOK).unwrap();
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .expect("top-level hooks object");
+        let session_start = hooks
+            .get_mut("SessionStart")
+            .and_then(Value::as_array_mut)
+            .expect("SessionStart array");
+        let first = session_start[0]
+            .as_object_mut()
+            .expect("SessionStart entry object");
+
+        first.insert("matcher".to_string(), json!(""));
+        assert_eq!(
+            missing_hooks("codex", &config, FAKE_HOOK),
+            vec!["SessionStart".to_string()]
+        );
+
+        let mut config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .expect("top-level hooks object");
+        let session_start = hooks
+            .get_mut("SessionStart")
+            .and_then(Value::as_array_mut)
+            .expect("SessionStart array");
+        let entry = session_start[0]
+            .as_object_mut()
+            .expect("SessionStart entry object");
+        let actions = entry
+            .get_mut("hooks")
+            .and_then(Value::as_array_mut)
+            .expect("inner hooks array");
+        let command = actions[0]
+            .as_object_mut()
+            .expect("command hook object");
+        command.insert("command".to_string(), json!("bash /wrong/hook.sh claude session-start"));
+
+        assert_eq!(
+            missing_hooks("claude", &config, FAKE_HOOK),
+            vec!["SessionStart".to_string()]
+        );
+    }
+
+    #[test]
+    fn missing_hooks_ignores_extra_entries() {
+        let mut config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .expect("top-level hooks object");
+        hooks.insert(
+            "Bogus".to_string(),
+            json!([
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "bash /fake/hook.sh claude bogus"
+                        }
+                    ]
+                }
+            ]),
+        );
+
+        assert!(missing_hooks("claude", &config, FAKE_HOOK).is_empty());
+    }
+
+    #[test]
+    fn missing_hooks_accepts_multiple_entries_and_actions_for_same_trigger() {
+        let mut config = build_agent_snippet("claude", FAKE_HOOK).unwrap();
+        let hooks = config
+            .get_mut("hooks")
+            .and_then(Value::as_object_mut)
+            .expect("top-level hooks object");
+
+        let session_start = hooks
+            .get_mut("SessionStart")
+            .and_then(Value::as_array_mut)
+            .expect("SessionStart array");
+        let mut duplicate_entry = session_start[0].clone();
+        duplicate_entry
+            .as_object_mut()
+            .expect("SessionStart entry object")
+            .get_mut("hooks")
+            .and_then(Value::as_array_mut)
+            .expect("inner hooks array")[0]
+            .as_object_mut()
+            .expect("command hook object")
+            .insert(
+                "command".to_string(),
+                json!("bash /wrong/hook.sh claude session-start"),
+            );
+        session_start.push(duplicate_entry);
+
+        let notification = hooks
+            .get_mut("Notification")
+            .and_then(Value::as_array_mut)
+            .expect("Notification array");
+        let notification_entry = notification[0]
+            .as_object_mut()
+            .expect("Notification entry object");
+        let notification_actions = notification_entry
+            .get_mut("hooks")
+            .and_then(Value::as_array_mut)
+            .expect("Notification hooks array");
+        notification_actions.push(json!({
+            "type": "command",
+            "command": "bash /tmp/extra-notify.sh claude notification",
+        }));
+
+        assert!(missing_hooks("claude", &config, FAKE_HOOK).is_empty());
+        assert!(!has_missing_hooks("claude", &config, FAKE_HOOK));
     }
 
     #[test]
