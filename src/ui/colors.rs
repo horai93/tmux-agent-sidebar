@@ -21,6 +21,7 @@ pub struct ColorTheme {
     pub filter_inactive: Color,
     pub agent_claude: Color,
     pub agent_codex: Color,
+    pub agent_pi: Color,
     pub text_active: Color,
     pub text_muted: Color,
     pub text_inactive: Color,
@@ -58,6 +59,7 @@ impl Default for ColorTheme {
             filter_inactive: Color::Indexed(245),
             agent_claude: Color::Indexed(174),
             agent_codex: Color::Indexed(141),
+            agent_pi: Color::Indexed(39),
             text_active: Color::Indexed(255),
             text_muted: Color::Indexed(252),
             text_inactive: Color::Indexed(244),
@@ -109,6 +111,7 @@ impl ColorTheme {
         theme.filter_inactive = read("@sidebar_color_filter_inactive", theme.filter_inactive);
         theme.agent_claude = read("@sidebar_color_agent_claude", theme.agent_claude);
         theme.agent_codex = read("@sidebar_color_agent_codex", theme.agent_codex);
+        theme.agent_pi = read("@sidebar_color_agent_pi", theme.agent_pi);
         theme.text_active = read("@sidebar_color_text_active", theme.text_active);
         theme.text_muted = read("@sidebar_color_text_muted", theme.text_muted);
         theme.text_inactive = read("@sidebar_color_text_inactive", theme.text_inactive);
@@ -151,6 +154,7 @@ impl ColorTheme {
         match agent {
             AgentType::Claude => self.agent_claude,
             AgentType::Codex => self.agent_codex,
+            AgentType::Pi => self.agent_pi,
             AgentType::Unknown => self.status_unknown,
         }
     }
@@ -209,6 +213,7 @@ mod tests {
         let theme = ColorTheme::default();
         assert_eq!(theme.agent_color(&AgentType::Claude), Color::Indexed(174));
         assert_eq!(theme.agent_color(&AgentType::Codex), Color::Indexed(141));
+        assert_eq!(theme.agent_color(&AgentType::Pi), Color::Indexed(39));
         assert_eq!(theme.agent_color(&AgentType::Unknown), theme.status_unknown);
     }
 }
