@@ -87,10 +87,9 @@ Add the plugin to your `tmux.conf`:
 
 ```tmux
 set -g @plugin 'hiroppy/tmux-agent-sidebar'
-run '~/.tmux/plugins/tpm/tpm'
 ```
 
-Press `prefix + I` to install. On the first run, an install wizard prompts you to download a pre-built binary or build from source.
+Reload tmux.conf (`tmux source ~/.tmux.conf`), then press `prefix + I` to install. On the first run, an install wizard prompts you to download a pre-built binary or build from source.
 
 To update later, press `prefix + U` in TPM's plugin list and select `tmux-agent-sidebar`. The install wizard runs again if the bundled binary has changed.
 
@@ -155,8 +154,6 @@ Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup c
 </details>
 
 #### 3.2 Codex
-
-Create `~/.codex/hooks.json` first.
 
 **Option A: Copy from the sidebar (recommended).**
 
