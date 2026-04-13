@@ -330,3 +330,34 @@ This is useful for integrating agent status into your tmux status bar, custom sc
 1. Remove the `set -g @plugin` (or `run-shell`) line from your `tmux.conf`
 2. Remove hook entries or plugins from your Claude Code / Codex settings
 3. Remove the plugin directory: `rm -rf ~/.tmux/plugins/tmux-agent-sidebar`
+
+## Development
+
+When `~/.tmux/plugins/tmux-agent-sidebar` is a symlink to this repository, running the following replaces the binary that your local tmux sidebar loads. Toggle the sidebar off → on to pick up the new build.
+
+```sh
+cargo build --release
+# or, enable the `debug` feature to force-display notices (version, missing hooks, claude plugin)
+cargo build --release --features debug
+```
+
+### Claude Code plugin
+
+This repository is itself a Claude Code marketplace (see `.claude-plugin/marketplace.json`). Because `~/.tmux/plugins/tmux-agent-sidebar` is symlinked to the repo, the same install flow from [3.1 Claude Code](#31-claude-code) already points Claude Code at your working copy:
+
+```
+/plugin marketplace add ~/.tmux/plugins/tmux-agent-sidebar
+/plugin install tmux-agent-sidebar@hiroppy
+```
+
+After editing plugin files, pick up changes without reinstalling:
+
+- **`hooks/hooks.json`, `.claude-plugin/plugin.json`, `hook.sh`** — run `/reload-plugins` in Claude Code (or restart it).
+- **Rust sources** — `cargo build --release`, then toggle the sidebar off → on.
+
+To iterate from a git worktree, register the worktree path as its own marketplace:
+
+```
+/plugin marketplace add <worktree-path>
+/plugin install tmux-agent-sidebar@hiroppy
+```

@@ -981,9 +981,7 @@ fn compute_claude_plugin_notice(
 }
 
 pub(crate) fn debug_forced_display() -> bool {
-    option_env!("DEBUG")
-        .map(|value| value != "0")
-        .unwrap_or(false)
+    cfg!(feature = "debug")
 }
 
 #[cfg(test)]

@@ -6,6 +6,11 @@ license = "MIT"
 description = "A tmux sidebar that monitors AI coding agents across all windows and sessions in real-time"
 repository = "https://github.com/hiroppy/tmux-agent-sidebar"
 
+[features]
+# Force-display notices (version, missing hooks, claude plugin) even when
+# none are actually pending. Useful for iterating on the notices popup UI.
+debug = []
+
 [dependencies]
 ratatui = "=0.30.0"
 crossterm = "=0.29.0"
