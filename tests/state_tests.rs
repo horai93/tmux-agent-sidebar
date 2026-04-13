@@ -296,6 +296,7 @@ fn test_scroll_git_bounds() {
         name: "file.rs".into(),
         additions: 0,
         deletions: 0,
+        path: String::new(),
     }];
     state.git_scroll.total_lines = 8;
     state.git_scroll.visible_height = 3;
@@ -329,6 +330,7 @@ fn test_apply_git_data() {
             name: "src/lib.rs".into(),
             additions: 10,
             deletions: 5,
+            path: String::new(),
         }],
         unstaged_files: vec![],
         untracked_files: vec![],
@@ -423,6 +425,7 @@ fn test_scroll_bottom_dispatches_to_git() {
         name: "file.rs".into(),
         additions: 0,
         deletions: 0,
+        path: String::new(),
     }];
     state.git_scroll.total_lines = 10;
     state.git_scroll.visible_height = 3;

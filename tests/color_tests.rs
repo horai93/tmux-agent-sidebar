@@ -264,6 +264,7 @@ fn test_git_summary_modified_uses_badge_auto_color() {
         name: "src/lib.rs".into(),
         additions: 5,
         deletions: 2,
+        path: String::new(),
     }];
 
     let styled = render_to_styled_string(&mut state, 28, 25);
@@ -517,6 +518,7 @@ fn test_file_change_stat_uses_file_change_color() {
         name: "lib.rs".into(),
         additions: 40,
         deletions: 10,
+        path: String::new(),
     }];
 
     let styled = render_to_styled_string(&mut state, 28, 25);

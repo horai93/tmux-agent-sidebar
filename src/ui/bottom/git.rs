@@ -547,6 +547,7 @@ mod tests {
             name: "a.rs".into(),
             additions: 1,
             deletions: 0,
+            path: String::new(),
         }];
         let lines = render_file_section("Staged", &files, 40, &theme, true);
         let header_span = &lines[0].spans[0];
@@ -605,6 +606,7 @@ mod tests {
             name: "medium-length-name.rs".into(),
             additions: 0,
             deletions: 0,
+            path: String::new(),
         }];
         let lines = render_file_section("Staged", &files, 40, &theme, true);
         let file_text = line_text(&lines[1]);
@@ -630,6 +632,7 @@ mod tests {
             name: "index.tsx".into(),
             additions: 100,
             deletions: 50,
+            path: String::new(),
         }];
         let lines = render_file_section("Staged", &files, 20, &theme, true);
         let file_text = line_text(&lines[1]);

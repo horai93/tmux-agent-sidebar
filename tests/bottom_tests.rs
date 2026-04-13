@@ -45,12 +45,14 @@ fn test_scroll_bottom_dispatches() {
             name: "file1.rs".into(),
             additions: 0,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "file2.rs".into(),
             additions: 0,
             deletions: 0,
+            path: String::new(),
         },
     ];
     state.git.untracked_files = vec!["file3.rs".into()];
@@ -97,12 +99,14 @@ fn snapshot_git_status_tab_ui() {
             name: "src/ui/panes.rs".into(),
             additions: 30,
             deletions: 10,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "src/state.rs".into(),
             additions: 12,
             deletions: 5,
+            path: String::new(),
         },
     ];
     state.git.untracked_files = vec!["new_file.rs".into()];
@@ -257,12 +261,14 @@ fn snapshot_git_full_info_ui() {
             name: "src/state.rs".into(),
             additions: 42,
             deletions: 10,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "src/ui/bottom.rs".into(),
             additions: 85,
             deletions: 20,
+            path: String::new(),
         },
     ];
     state.git.untracked_files = vec!["new_file.rs".into()];
@@ -312,12 +318,14 @@ fn snapshot_git_long_filename_truncated_ui() {
             name: "very-long-filename-that-should-be-truncated.rs".into(),
             additions: 150,
             deletions: 50,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "short.rs".into(),
             additions: 8,
             deletions: 2,
+            path: String::new(),
         },
     ];
 
@@ -364,42 +372,49 @@ fn snapshot_git_more_than_5_files() {
             name: "a.rs".into(),
             additions: 100,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "b.rs".into(),
             additions: 80,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "c.rs".into(),
             additions: 60,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "d.rs".into(),
             additions: 40,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "e.rs".into(),
             additions: 20,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "f.rs".into(),
             additions: 10,
             deletions: 0,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'M',
             name: "g.rs".into(),
             additions: 5,
             deletions: 0,
+            path: String::new(),
         },
     ];
 
@@ -981,12 +996,14 @@ fn snapshot_git_staged_unstaged_untracked_ui() {
             name: "app.rs".into(),
             additions: 10,
             deletions: 2,
+            path: String::new(),
         },
         tmux_agent_sidebar::git::GitFileEntry {
             status: 'A',
             name: "new.rs".into(),
             additions: 2,
             deletions: 0,
+            path: String::new(),
         },
     ];
     state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
@@ -994,6 +1011,7 @@ fn snapshot_git_staged_unstaged_untracked_ui() {
         name: "config.toml".into(),
         additions: 0,
         deletions: 1,
+        path: String::new(),
     }];
     state.git.untracked_files = vec!["debug.log".into()];
 
@@ -1045,6 +1063,7 @@ fn snapshot_git_long_branch_with_pr_ui() {
         name: "main.rs".into(),
         additions: 5,
         deletions: 2,
+        path: String::new(),
     }];
 
     let output = render_to_string(&mut state, 28, 24);
@@ -1089,6 +1108,7 @@ fn snapshot_git_staged_only_ui() {
         name: "new_feature.rs".into(),
         additions: 20,
         deletions: 0,
+        path: String::new(),
     }];
 
     let output = render_to_string(&mut state, 28, 24);
@@ -1132,6 +1152,7 @@ fn snapshot_git_many_files_more_indicator_ui() {
             name: format!("f{i}.rs"),
             additions: 1,
             deletions: 0,
+            path: String::new(),
         })
         .collect();
 
