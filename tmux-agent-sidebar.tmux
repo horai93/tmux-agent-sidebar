@@ -2,12 +2,12 @@
 
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if [[ -x "$PLUGIN_DIR/target/release/tmux-agent-sidebar" ]]; then
+if [[ -x "$PLUGIN_DIR/bin/tmux-agent-sidebar" ]]; then
+    SIDEBAR_BINARY="$PLUGIN_DIR/bin/tmux-agent-sidebar"
+elif [[ -x "$PLUGIN_DIR/target/release/tmux-agent-sidebar" ]]; then
     SIDEBAR_BINARY="$PLUGIN_DIR/target/release/tmux-agent-sidebar"
 elif command -v "tmux-agent-sidebar" &>/dev/null; then
     SIDEBAR_BINARY="tmux-agent-sidebar"
-elif [[ -x "$PLUGIN_DIR/bin/tmux-agent-sidebar" ]]; then
-    SIDEBAR_BINARY="$PLUGIN_DIR/bin/tmux-agent-sidebar"
 fi
 
 if [[ -z "$SIDEBAR_BINARY" ]]; then
