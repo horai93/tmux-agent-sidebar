@@ -27,7 +27,7 @@
         </li>
         <li><b>Agent color</b>
           <ul>
-            <li>Claude (terracotta), Codex (purple)</li>
+            <li>Claude (terracotta), Codex (purple), <code>/rename</code></li>
           </ul>
         </li>
         <li><b>Permission badge</b>
