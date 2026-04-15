@@ -393,306 +393,401 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
 }
 
 #[cfg(test)]
-fn line_text(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect()
-}
-
-#[cfg(test)]
-fn line_visual(line: &Line<'_>) -> String {
-    line.spans
-        .iter()
-        .map(|span| span.content.as_ref().replace(' ', "·"))
-        .collect::<Vec<_>>()
-        .join("")
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::GitFileEntry;
+    use crate::state::AppState;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::style::Color;
 
-    // ─── PR underline tests ─────────────────────────────────────
-
-    #[test]
-    fn pr_number_no_trailing_underline() {
-        let mut state = crate::state::AppState::new(String::new());
-        state.git.branch = "main".into();
-        state.git.pr_number = Some("5".into());
-        let (lines, _) = render_git_header(&state, 30);
-        let spans = &lines[1].spans;
-        let pr_span = spans.iter().find(|s| s.content.as_ref() == "#5").unwrap();
-        assert_eq!(pr_span.content.as_ref(), "#5");
-        assert!(pr_span.style.add_modifier.contains(Modifier::UNDERLINED));
+    /// Render the git panel at the given size and return the resulting
+    /// `AppState` plus the buffer-backed terminal. Used by every
+    /// visual-assertion test in this file.
+    fn draw(state: &mut AppState, width: u16, height: u16) -> Terminal<TestBackend> {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, width, height);
+                draw_git_content(frame, state, area);
+            })
+            .unwrap();
+        terminal
     }
 
-    // ─── PR hyperlink overlay tests ────────────────────────────────
+    /// Snapshot the git panel as plain text. Trailing whitespace on each row
+    /// and trailing empty rows are trimmed so inline snapshots stay readable.
+    fn render(state: &mut AppState, width: u16, height: u16) -> String {
+        let terminal = draw(state, width, height);
+        let buf = terminal.backend().buffer().clone();
+        let mut rows: Vec<String> = Vec::new();
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            rows.push(line.trim_end().to_string());
+        }
+        while rows.last().is_some_and(|l| l.is_empty()) {
+            rows.pop();
+        }
+        rows.join("\n")
+    }
+
+    /// Snapshot the git panel with foreground color and text modifier
+    /// annotations per cell. Used when the assertion is about color or
+    /// underline rather than plain characters.
+    fn render_styled(state: &mut AppState, width: u16, height: u16) -> String {
+        let terminal = draw(state, width, height);
+        let buf = terminal.backend().buffer().clone();
+        let mut rows: Vec<String> = Vec::new();
+        for y in 0..buf.area.height {
+            let mut line = String::new();
+            for x in 0..buf.area.width {
+                let cell = &buf[(x, y)];
+                line.push_str(cell.symbol());
+                let mut attrs: Vec<String> = Vec::new();
+                if let Color::Indexed(n) = cell.fg {
+                    attrs.push(format!("fg:{n}"));
+                }
+                if cell.modifier.contains(Modifier::UNDERLINED) {
+                    attrs.push("underline".into());
+                }
+                if cell.modifier.contains(Modifier::BOLD) {
+                    attrs.push("bold".into());
+                }
+                if !attrs.is_empty() {
+                    line.push_str(&format!("[{}]", attrs.join(",")));
+                }
+            }
+            rows.push(line.trim_end().to_string());
+        }
+        while rows.last().is_some_and(|l| l.is_empty()) {
+            rows.pop();
+        }
+        rows.join("\n")
+    }
+
+    fn file_entry(status: char, name: &str, additions: usize, deletions: usize) -> GitFileEntry {
+        GitFileEntry {
+            status,
+            name: name.into(),
+            additions,
+            deletions,
+            path: String::new(),
+        }
+    }
+
+    // ─── PR hyperlink overlay state (non-visual) ────────────────────
 
     #[test]
-    fn pr_link_info_has_correct_url() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn pr_link_overlay_has_correct_url() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.pr_number = Some("42".into());
         state.git.remote_url = "https://github.com/user/repo".into();
-        let (_, pr_link) = render_git_header(&state, 30);
-        let info = pr_link.expect("pr_link should be Some");
-        assert_eq!(info.url, "https://github.com/user/repo/pull/42");
-        assert_eq!(info.text, "#42");
+        draw(&mut state, 30, 4);
+        let overlay = state
+            .layout
+            .hyperlink_overlays
+            .first()
+            .expect("PR overlay should be registered");
+        assert_eq!(overlay.url, "https://github.com/user/repo/pull/42");
+        assert_eq!(overlay.text, "#42");
     }
 
     #[test]
-    fn pr_link_info_none_without_remote_url() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn pr_link_overlay_absent_without_remote_url() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.pr_number = Some("10".into());
-        // remote_url is empty by default
-        let (_, pr_link) = render_git_header(&state, 30);
-        assert!(pr_link.is_none());
+        draw(&mut state, 30, 4);
+        assert!(state.layout.hyperlink_overlays.is_empty());
     }
 
     #[test]
-    fn pr_link_info_none_without_pr_number() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn pr_link_overlay_absent_without_pr_number() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.remote_url = "https://github.com/user/repo".into();
-        let (_, pr_link) = render_git_header(&state, 30);
-        assert!(pr_link.is_none());
+        draw(&mut state, 30, 4);
+        assert!(state.layout.hyperlink_overlays.is_empty());
     }
 
     #[test]
-    fn pr_link_x_offset_right_aligned() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn pr_link_overlay_right_aligned_on_second_row() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.pr_number = Some("7".into());
         state.git.remote_url = "https://github.com/user/repo".into();
-        let width = 30;
-        let (_, pr_link) = render_git_header(&state, width);
-        let info = pr_link.unwrap();
-        // PR text "#7" is 2 chars wide, so x_offset = 30 - 2 = 28.
-        let pr_display_w = display_width(&info.text);
-        assert_eq!(info.x_offset as usize, width - pr_display_w);
+        let width: u16 = 30;
+        draw(&mut state, width, 4);
+        let overlay = state.layout.hyperlink_overlays.first().unwrap();
+        assert_eq!(
+            overlay.x as usize,
+            width as usize - display_width(&overlay.text),
+        );
+        assert_eq!(overlay.y, 1);
     }
 
+    // ─── Branch / PR header rendering ────────────────────────────────
+
     #[test]
-    fn header_with_pr_number_inline_snapshot() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_renders_branch_with_ahead_behind_and_pr() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.ahead_behind = Some((2, 1));
         state.git.pr_number = Some("7".into());
+        insta::assert_snapshot!(render(&mut state, 40, 4), @"
 
-        let (lines, _) = render_git_header(&state, 40);
-        insta::assert_snapshot!(line_visual(&lines[1]), @"main·····························↑2↓1·#7");
+        main                             ↑2↓1 #7
+        ────────────────────────────────────────
+                   Working tree clean
+        ");
     }
 
     #[test]
-    fn header_without_pr_number_inline_snapshot() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_renders_branch_with_ahead_behind_without_pr() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.ahead_behind = Some((2, 1));
+        insta::assert_snapshot!(render(&mut state, 40, 4), @"
 
-        let (lines, _) = render_git_header(&state, 40);
-        insta::assert_snapshot!(line_visual(&lines[1]), @"main································↑2↓1");
+        main                                ↑2↓1
+        ────────────────────────────────────────
+                   Working tree clean
+        ");
     }
 
     #[test]
-    fn header_ahead_behind_has_no_internal_space() {
-        let mut state = crate::state::AppState::new(String::new());
-        state.git.branch = "main".into();
-        state.git.ahead_behind = Some((2, 1));
-        state.git.pr_number = Some("7".into());
-
-        let (lines, _) = render_git_header(&state, 40);
-        let spans = &lines[1].spans;
-        let two_pos = spans
-            .iter()
-            .position(|span| span.content.as_ref() == "2")
-            .expect("ahead count should be rendered");
-        let down_pos = spans
-            .iter()
-            .position(|span| span.content.as_ref() == "↓")
-            .expect("behind arrow should be rendered");
-        assert!(
-            two_pos < down_pos,
-            "ahead count should appear before behind arrow"
-        );
-        assert!(
-            !spans[two_pos + 1..down_pos]
-                .iter()
-                .any(|span| span.content.as_ref() == " "),
-            "movement group should not contain an internal separator"
-        );
-    }
-
-    #[test]
-    fn header_with_long_branch_inline_snapshot() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_truncates_long_branch_to_fit_width() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "feature/sidebar/really-long-branch-name-that-should-truncate".into();
         state.git.ahead_behind = Some((2, 1));
         state.git.pr_number = Some("7".into());
+        insta::assert_snapshot!(render(&mut state, 32, 4), @"
 
-        let (lines, _) = render_git_header(&state, 32);
-        insta::assert_snapshot!(line_visual(&lines[1]), @"feature/sidebar/really…··↑2↓1·#7");
-    }
-
-    // ─── Section title color tests ───────────────────────────────
-
-    #[test]
-    fn section_title_uses_section_title_color() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files = vec![crate::git::GitFileEntry {
-            status: 'M',
-            name: "a.rs".into(),
-            additions: 1,
-            deletions: 0,
-            path: String::new(),
-        }];
-        let lines = render_file_section("Staged", &files, 40, &theme, true);
-        let header_span = &lines[0].spans[0];
-        assert_eq!(header_span.style.fg, Some(theme.section_title));
+        feature/sidebar/really…  ↑2↓1 #7
+        ────────────────────────────────
+               Working tree clean
+        ");
     }
 
     #[test]
-    fn untracked_title_uses_section_title_color() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files = vec!["tmp.log".to_string()];
-        let lines = render_untracked_section(&files, 40, &theme);
-        let header_span = &lines[0].spans[0];
-        assert_eq!(header_span.style.fg, Some(theme.section_title));
+    fn header_pr_number_is_underlined_and_colored() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.pr_number = Some("5".into());
+        insta::assert_snapshot!(render_styled(&mut state, 30, 4), @"
+
+        m[fg:255]a[fg:255]i[fg:255]n[fg:255]                        #[fg:117,underline]5[fg:117,underline]
+        ─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]
+              W[fg:252]o[fg:252]r[fg:252]k[fg:252]i[fg:252]n[fg:252]g[fg:252] [fg:252]t[fg:252]r[fg:252]e[fg:252]e[fg:252] [fg:252]c[fg:252]l[fg:252]e[fg:252]a[fg:252]n[fg:252]
+        ");
     }
 
-    // ─── More indicator right-alignment (untracked) ──────────────
+    // ─── Header structure (diff summary row) ─────────────────────────
 
     #[test]
-    fn more_indicator_right_aligned_untracked() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files: Vec<String> = (0..11).map(|i| format!("file{i}.tmp")).collect();
-        let lines = render_untracked_section(&files, 30, &theme);
-        let more_line = lines.last().unwrap();
-        let text = line_text(more_line);
-        assert_eq!(text.trim(), "+1 more");
-        assert_eq!(display_width(&text), 30);
-    }
-
-    #[test]
-    fn more_indicator_right_aligned_untracked_overflow_two() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files: Vec<String> = (0..12).map(|i| format!("file{i}.tmp")).collect();
-        let lines = render_untracked_section(&files, 30, &theme);
-        let more_line = lines.last().unwrap();
-        let text = line_text(more_line);
-        assert_eq!(text.trim(), "+2 more");
-        assert_eq!(display_width(&text), 30);
-    }
-
-    // ─── Header structure tests ──────────────────────────────────
-
-    #[test]
-    fn header_blank_line_between_branch_and_diff() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_includes_blank_row_branch_and_diff_summary() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.diff_stat = Some((1, 0));
-        let (lines, _) = render_git_header(&state, 40);
-        assert_eq!(lines.len(), 4);
-        assert!(line_text(&lines[0]).is_empty());
+        insta::assert_snapshot!(render(&mut state, 40, 6), @"
+
+        main
+        +1/-0                            0 files
+        ────────────────────────────────────────
+                   Working tree clean
+        ");
     }
 
     #[test]
-    fn header_no_blank_line_without_changes() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_has_no_diff_row_when_no_changes() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
-        let (lines, _) = render_git_header(&state, 40);
-        assert_eq!(lines.len(), 3);
-        assert!(line_text(&lines[0]).is_empty());
+        insta::assert_snapshot!(render(&mut state, 40, 5), @"
+
+        main
+        ────────────────────────────────────────
+                   Working tree clean
+        ");
     }
 
     #[test]
-    fn header_diff_summary_is_tight() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_diff_summary_right_aligns_file_count_with_stats() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
         state.git.diff_stat = Some((10, 3));
-        let (lines, _) = render_git_header(&state, 40);
-        assert_eq!(
-            line_text(&lines[2]),
-            "+10/-3                           0 files"
-        );
+        insta::assert_snapshot!(render(&mut state, 40, 4), @"
+
+        main
+        +10/-3                           0 files
+        ────────────────────────────────────────
+        ");
     }
 
     #[test]
-    fn header_diff_summary_tight_with_file_count_only() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn header_diff_summary_right_aligns_file_count_without_stats() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "main".into();
-        state.git.staged_files = vec![crate::git::GitFileEntry {
-            status: 'A',
-            name: "new.rs".into(),
-            additions: 1,
-            deletions: 0,
-            path: String::new(),
-        }];
-        let (lines, _) = render_git_header(&state, 40);
-        assert_eq!(
-            line_text(&lines[2]),
-            "                                 1 files"
-        );
+        state.git.staged_files = vec![file_entry('A', "new.rs", 1, 0)];
+        insta::assert_snapshot!(render(&mut state, 40, 6), @"
+
+        main
+                                         1 files
+        ────────────────────────────────────────
+        Staged (1)
+        A new.rs                           +1/-0
+        ");
     }
 
-    // ─── Edge case: truncation & narrow width ────────────────────
+    // ─── Section title color ─────────────────────────────────────────
 
     #[test]
-    fn long_filename_no_diff_uses_full_width() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files = vec![crate::git::GitFileEntry {
-            status: 'M',
-            name: "medium-length-name.rs".into(),
-            additions: 0,
-            deletions: 0,
-            path: String::new(),
-        }];
-        let lines = render_file_section("Staged", &files, 40, &theme, true);
-        let file_text = line_text(&lines[1]);
-        assert_eq!(file_text, "M medium-length-name.rs");
+    fn staged_section_title_uses_section_title_color() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.staged_files = vec![file_entry('M', "a.rs", 1, 0)];
+        insta::assert_snapshot!(render_styled(&mut state, 40, 6), @"
+
+        m[fg:255]a[fg:255]i[fg:255]n[fg:255]
+                                         1[fg:252] [fg:252]f[fg:252]i[fg:252]l[fg:252]e[fg:252]s[fg:252]
+        ─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]
+        S[fg:109]t[fg:109]a[fg:109]g[fg:109]e[fg:109]d[fg:109] [fg:109]([fg:109]1[fg:109])[fg:109]
+        M[fg:221] a[fg:252].[fg:252]r[fg:252]s[fg:252]                             +[fg:114]1[fg:114]/[fg:252]-[fg:174]0[fg:174]
+        ");
     }
 
     #[test]
-    fn long_untracked_filename_truncated() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files = vec!["a-very-long-untracked-filename-that-exceeds-width.tmp".to_string()];
-        let lines = render_untracked_section(&files, 25, &theme);
-        let file_text = line_text(&lines[1]);
-        assert!(display_width(&file_text) <= 25);
-        assert_eq!(file_text, "? a-very-long-untracked-…");
+    fn untracked_section_title_uses_section_title_color() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.untracked_files = vec!["tmp.log".into()];
+        insta::assert_snapshot!(render_styled(&mut state, 40, 6), @"
+
+        m[fg:255]a[fg:255]i[fg:255]n[fg:255]
+                                         1[fg:252] [fg:252]f[fg:252]i[fg:252]l[fg:252]e[fg:252]s[fg:252]
+        ─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]─[fg:240]
+        U[fg:109]n[fg:109]t[fg:109]r[fg:109]a[fg:109]c[fg:109]k[fg:109]e[fg:109]d[fg:109] [fg:109]([fg:109]1[fg:109])[fg:109]
+        ?[fg:252] t[fg:252]m[fg:252]p[fg:252].[fg:252]l[fg:252]o[fg:252]g[fg:252]
+        ");
+    }
+
+    // ─── "+N more" indicator right-alignment (untracked) ─────────────
+
+    #[test]
+    fn untracked_more_indicator_right_aligned_single_overflow() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.untracked_files = (0..11).map(|i| format!("file{i}.tmp")).collect();
+        insta::assert_snapshot!(render(&mut state, 30, 20), @"
+
+        main
+                              11 files
+        ──────────────────────────────
+        Untracked (11)
+        ? file0.tmp
+        ? file1.tmp
+        ? file2.tmp
+        ? file3.tmp
+        ? file4.tmp
+        ? file5.tmp
+        ? file6.tmp
+        ? file7.tmp
+        ? file8.tmp
+        ? file9.tmp
+                               +1 more
+        ");
     }
 
     #[test]
-    fn narrow_width_file_section_fits() {
-        let theme = crate::ui::colors::ColorTheme::default();
-        let files = vec![crate::git::GitFileEntry {
-            status: 'A',
-            name: "index.tsx".into(),
-            additions: 100,
-            deletions: 50,
-            path: String::new(),
-        }];
-        let lines = render_file_section("Staged", &files, 20, &theme, true);
-        let file_text = line_text(&lines[1]);
-        assert!(display_width(&file_text) <= 20);
-        assert_eq!(file_text, "A index.tsx +100/-50");
+    fn untracked_more_indicator_right_aligned_two_overflow() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.untracked_files = (0..12).map(|i| format!("file{i}.tmp")).collect();
+        insta::assert_snapshot!(render(&mut state, 30, 20), @"
+
+        main
+                              12 files
+        ──────────────────────────────
+        Untracked (12)
+        ? file0.tmp
+        ? file1.tmp
+        ? file2.tmp
+        ? file3.tmp
+        ? file4.tmp
+        ? file5.tmp
+        ? file6.tmp
+        ? file7.tmp
+        ? file8.tmp
+        ? file9.tmp
+                               +2 more
+        ");
+    }
+
+    // ─── Edge case: truncation & narrow widths ───────────────────────
+
+    #[test]
+    fn staged_file_without_diff_uses_full_width() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.staged_files = vec![file_entry('M', "medium-length-name.rs", 0, 0)];
+        insta::assert_snapshot!(render(&mut state, 40, 6), @"
+
+        main
+                                         1 files
+        ────────────────────────────────────────
+        Staged (1)
+        M medium-length-name.rs
+        ");
     }
 
     #[test]
-    fn narrow_width_header_fits() {
-        let mut state = crate::state::AppState::new(String::new());
+    fn untracked_filename_is_truncated_with_ellipsis_at_narrow_width() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.untracked_files =
+            vec!["a-very-long-untracked-filename-that-exceeds-width.tmp".into()];
+        insta::assert_snapshot!(render(&mut state, 25, 6), @"
+
+        main
+                          1 files
+        ─────────────────────────
+        Untracked (1)
+        ? a-very-long-untracked-…
+        ");
+    }
+
+    #[test]
+    fn staged_file_at_narrow_width_fits_diff_and_name() {
+        let mut state = AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.staged_files = vec![file_entry('A', "index.tsx", 100, 50)];
+        insta::assert_snapshot!(render(&mut state, 20, 6), @"
+
+        main
+                     1 files
+        ────────────────────
+        Staged (1)
+        A index.tsx +100/-50
+        ");
+    }
+
+    #[test]
+    fn header_fits_narrow_width_with_long_diff_stats() {
+        let mut state = AppState::new(String::new());
         state.git.branch = "feature/branch".into();
         state.git.pr_number = Some("1".into());
         state.git.diff_stat = Some((999, 888));
-        let (lines, _) = render_git_header(&state, 20);
-        for line in &lines {
-            let text = line_text(line);
-            assert!(
-                display_width(&text) <= 20,
-                "line exceeds width: '{text}' ({})",
-                display_width(&text)
-            );
-        }
+        insta::assert_snapshot!(render(&mut state, 20, 5), @"
+
+        feature/branch    #1
+        +999/-888    0 files
+        ────────────────────
+         Working tree clean
+        ");
     }
 }

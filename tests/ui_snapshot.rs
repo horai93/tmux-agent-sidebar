@@ -1296,48 +1296,166 @@ fn right_border_narrow_width_with_badge() {
 
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
 
+    // Snapshot locks in the `!` badge visibility at narrow width plus a
+    // fully-drawn right border.
     let output = render_to_string(&mut state, 22, 25);
-    assert!(
-        output.contains("!"),
-        "badge should remain visible at narrow width"
-    );
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                  — ▾
+    ┃ ● claude !    2h0m0s
+        fix the issue
+    ╭ Activity │ Git ────╮
+    │   No activity yet  │
+    ╰────────────────────╯
+    ");
+    // Structural invariant (width-agnostic): every line that starts with a
+    // border glyph must also end with one. Kept alongside the snapshot so
+    // border regressions are caught even if someone regenerates the snapshot.
     assert_right_border_intact(&output);
 }
 
 #[test]
 fn right_border_all_permission_modes_and_agents() {
-    let modes_and_badges: &[(PermissionMode, &str)] = &[
-        (PermissionMode::Default, ""),
-        (PermissionMode::Auto, "auto"),
-        (PermissionMode::DontAsk, "dontAsk"),
-        (PermissionMode::Plan, "plan"),
-        (PermissionMode::AcceptEdits, "edit"),
-        (PermissionMode::BypassPermissions, "!"),
+    let modes: &[PermissionMode] = &[
+        PermissionMode::Default,
+        PermissionMode::Auto,
+        PermissionMode::DontAsk,
+        PermissionMode::Plan,
+        PermissionMode::AcceptEdits,
+        PermissionMode::BypassPermissions,
     ];
     let agents = [AgentType::Claude, AgentType::Codex];
     let now = FIXED_NOW;
 
+    // Render every (agent, mode) combination into a single composite string
+    // so one inline snapshot covers the full matrix. A regression in any
+    // single cell surfaces as a diff that names the exact combo.
+    // Each render is also passed through `assert_right_border_intact`, the
+    // structural invariant that catches width-agnostic border breakage.
+    let mut composite = String::new();
     for agent in &agents {
-        for (mode, expected_badge) in modes_and_badges {
+        for mode in modes {
             let mut pane = make_pane(agent.clone(), PaneStatus::Running);
             pane.permission_mode = mode.clone();
             pane.started_at = Some(now - 5432); // ~1h30m
 
             let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane])]);
-
-            let output = render_to_string(&mut state, 28, 25);
-            assert_right_border_intact(&output);
-            if !expected_badge.is_empty() {
-                assert!(
-                    output.contains(expected_badge),
-                    "{:?} {:?} should show badge {:?}",
-                    agent,
-                    mode,
-                    expected_badge,
-                );
-            }
+            let rendered = render_to_string(&mut state, 28, 25);
+            assert_right_border_intact(&rendered);
+            composite.push_str(&format!("=== {:?} / {:?} ===\n", agent, mode));
+            composite.push_str(&rendered);
+            composite.push_str("\n\n");
         }
     }
+    insta::assert_snapshot!(composite, @"
+    === Claude / Default ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude          1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Claude / Auto ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude auto     1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Claude / DontAsk ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude dontAsk  1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Claude / Plan ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude plan     1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Claude / AcceptEdits ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude edit     1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Claude / BypassPermissions ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude !        1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Codex / Default ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● codex           1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Codex / Auto ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● codex auto      1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Codex / DontAsk ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● codex dontAsk   1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Codex / Plan ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● codex plan      1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Codex / AcceptEdits ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● codex edit      1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+
+    === Codex / BypassPermissions ===
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● codex !         1h30m32s
+    ╭ Activity │ Git ──────────╮
+    │      No activity yet     │
+    ╰──────────────────────────╯
+    ");
 }
 
 // ─── Filter Bar Tests ────────────────────────────────────────────
@@ -1524,12 +1642,9 @@ fn snapshot_filter_selected_icon_has_color_without_underline() {
     let mut state = make_state_with_groups(vec![make_repo_group("project", vec![pane1, pane2])]);
     state.global.status_filter = StatusFilter::Running;
 
+    // The inline snapshot captures the styled filter bar; any underline
+    // modifier on the selected filter would surface in the snapshot diff.
     let styled = render_to_styled_string(&mut state, 30, 25);
-    assert!(
-        !styled.contains("underline"),
-        "selected filter should not be underlined"
-    );
-
     let line = styled.lines().next().unwrap();
     insta::assert_snapshot!(line, @" ≡[fg:245]2[fg:255]  ●[fg:114]1[fg:255]  ◐[fg:245]0[fg:245]  ○[fg:245]1[fg:255]  ✕[fg:245]0[fg:245]");
 }
