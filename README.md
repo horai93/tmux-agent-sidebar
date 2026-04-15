@@ -74,7 +74,7 @@
 ## Requirements
 
 - tmux 3.0+
-- [TPM](https://github.com/tmux-plugins/tpm) (recommended, for plugin installation)
+- [TPM](https://github.com/tmux-plugins/tpm) (for plugin installation)
 - [GitHub CLI](https://cli.github.com/) (optional, for displaying PR numbers in the Git tab)
 - [Rust](https://rustup.rs/) (only if building from source)
 
@@ -156,65 +156,10 @@ Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup c
 
 #### 3.2 Codex
 
-**Option A: Copy from the sidebar (recommended).**
-
 1. Open a Codex pane in tmux and focus it.
 2. Press `prefix + e` to toggle the sidebar. A yellow `ⓘ` badge appears in the top row of the sidebar when required hooks are missing.
 3. Click `ⓘ`, then click `[copy]` next to `codex` in the Notices popup.
 4. Switch back to the Codex pane and paste. Codex will run `tmux-agent-sidebar setup codex` and merge the hooks into `~/.codex/hooks.json`.
-
-<details>
-<summary>Option B: Paste this JSON into <code>~/.codex/hooks.json</code></summary>
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|resume",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh codex session-start"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh codex user-prompt-submit"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh codex stop"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash ~/.tmux/plugins/tmux-agent-sidebar/hook.sh codex activity-log"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-</details>
 
 ## Keybindings
 
