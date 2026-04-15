@@ -53,7 +53,7 @@ impl Default for ColorTheme {
             status_running: Color::Indexed(114),
             status_waiting: Color::Indexed(221),
             status_idle: Color::Indexed(110),
-            status_error: Color::Indexed(203),
+            status_error: Color::Indexed(167),
             status_unknown: Color::Indexed(244),
             filter_inactive: Color::Indexed(245),
             agent_claude: Color::Indexed(174),
@@ -64,9 +64,9 @@ impl Default for ColorTheme {
             session_header: Color::Indexed(39),
             port: Color::Indexed(246),
             wait_reason: Color::Indexed(221),
-            selection_bg: Color::Indexed(237),
+            selection_bg: Color::Indexed(239),
             branch: Color::Indexed(109),
-            badge_danger: Color::Indexed(203),
+            badge_danger: Color::Indexed(167),
             badge_auto: Color::Indexed(221),
             badge_plan: Color::Indexed(117),
             task_progress: Color::Indexed(223),
@@ -196,7 +196,7 @@ mod tests {
         );
         assert_eq!(
             theme.status_color(&PaneStatus::Error, false),
-            Color::Indexed(203)
+            Color::Indexed(167)
         );
         assert_eq!(
             theme.status_color(&PaneStatus::Unknown, false),

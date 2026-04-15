@@ -340,7 +340,7 @@ fn repo_popup_highlights_selected_entry_with_background() {
     // The highlighted row should carry the selection background.
     // render_to_styled_string interleaves style annotations between glyphs, so
     // "backend" never appears as a contiguous substring — match on the styled
-    // bytes of each character ("b[fg:...,bg:237,bold]") to detect the selected
+    // bytes of each character ("b[fg:...,bg:239,bold]") to detect the selected
     // row precisely.
     let theme = &state.theme;
     let bg_idx = match theme.selection_bg {

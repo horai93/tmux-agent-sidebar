@@ -9,14 +9,14 @@ use ratatui::{
 use crate::state::AppState;
 use crate::ui::text::{display_width, pad_to, truncate_to_width};
 
-const MAX_CHANGED_FILES: usize = 5;
+const MAX_CHANGED_FILES: usize = 10;
 
 fn render_more_indicator(
     remaining: usize,
     inner_w: usize,
     theme: &crate::ui::colors::ColorTheme,
 ) -> Line<'static> {
-    let more_text = format!("+{} more ", remaining);
+    let more_text = format!("+{} more", remaining);
     let more_w = display_width(&more_text);
     let gap = pad_to(more_w, inner_w);
     Line::from(vec![
@@ -42,12 +42,16 @@ fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, O
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut pr_link_info: Option<PrLinkInfo> = None;
 
-    // Line 1: branch (left) + ahead/behind + PR number (right)
+    // Leave one blank row at the top of the Git panel header.
+    lines.push(Line::from(""));
+
+    // Line 1 is blank.
+    // Line 2: branch (left) + ahead/behind + PR number (right)
     if !state.git.branch.is_empty() {
         let mut left_spans: Vec<Span> = Vec::new();
 
         // Build branch text
-        let branch_text = format!(" {}", state.git.branch);
+        let branch_text = state.git.branch.clone();
         let mut movement_spans: Vec<Span> = Vec::new();
         if let Some((ahead, behind)) = state.git.ahead_behind {
             if ahead > 0 {
@@ -70,15 +74,14 @@ fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, O
         // Build PR text (no trailing space — underline should not extend)
         let pr_text = state.git.pr_number.as_ref().map(|n| format!("#{n}"));
 
-        // Reserve space: PR text + 1 trailing space for right margin
-        let pr_w = pr_text.as_ref().map_or(0, |t| display_width(t) + 1);
+        // Reserve space for the PR text itself.
+        let pr_w = pr_text.as_ref().map_or(0, |t| display_width(t));
         let movement_w = movement_spans
             .iter()
             .map(|span| display_width(span.content.as_ref()))
             .sum::<usize>();
         let separator_w = if movement_w > 0 && pr_w > 0 { 1 } else { 0 };
-        let tail_w = if pr_text.is_some() { 0 } else { 1 };
-        let right_w = movement_w + separator_w + pr_w + tail_w;
+        let right_w = movement_w + separator_w + pr_w;
 
         // Truncate branch if it collides with PR number
         let max_branch_w = inner_w.saturating_sub(right_w + if right_w > 0 { 1 } else { 0 });
@@ -104,8 +107,6 @@ fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, O
                     .fg(theme.pr_link)
                     .add_modifier(Modifier::UNDERLINED),
             ));
-            left_spans.push(Span::raw(" "));
-
             // Build PR URL from remote_url
             if !state.git.remote_url.is_empty()
                 && let Some(num) = &state.git.pr_number
@@ -120,45 +121,37 @@ fn render_git_header(state: &AppState, inner_w: usize) -> (Vec<Line<'static>>, O
             let gap = pad_to(branch_w + right_w, inner_w);
             left_spans.push(Span::raw(gap));
             left_spans.extend(movement_spans);
-            left_spans.push(Span::raw(" "));
         } else {
             let gap = pad_to(branch_w + right_w, inner_w);
             left_spans.push(Span::raw(gap));
-            left_spans.push(Span::raw(" "));
         }
 
         lines.push(Line::from(left_spans));
     }
 
-    // Blank line between branch and diff summary
     let has_changes = state.git.diff_stat.is_some() || state.git.changed_file_count() > 0;
-    if !state.git.branch.is_empty() && has_changes {
-        lines.push(Line::from(""));
-    }
 
-    // Line 2: diff summary (+ins -del   N files)
+    // Line 3: diff summary (+ins -del   N files)
     if has_changes {
         let mut left_spans: Vec<Span> = Vec::new();
-        let mut left_w = 1; // leading space
-
-        left_spans.push(Span::raw(" "));
+        let mut diff_w = 0;
 
         if let Some((ins, del)) = state.git.diff_stat {
             let s_ins = format!("+{ins}");
-            left_w += display_width(&s_ins);
+            diff_w += display_width(&s_ins);
             left_spans.push(Span::styled(s_ins, Style::default().fg(theme.diff_added)));
 
             left_spans.push(Span::styled("/", Style::default().fg(theme.text_muted)));
-            left_w += 1;
+            diff_w += 1;
 
             let s_del = format!("-{del}");
-            left_w += display_width(&s_del);
+            diff_w += display_width(&s_del);
             left_spans.push(Span::styled(s_del, Style::default().fg(theme.diff_deleted)));
         }
 
-        let files_text = format!("{} files ", state.git.changed_file_count());
+        let files_text = format!("{} files", state.git.changed_file_count());
         let files_w = display_width(&files_text);
-        let gap = pad_to(left_w + files_w, inner_w);
+        let gap = pad_to(diff_w + files_w, inner_w);
         left_spans.push(Span::raw(gap));
         left_spans.push(Span::styled(
             files_text,
@@ -193,7 +186,7 @@ fn render_file_section(
 
     // Section header
     lines.push(Line::from(Span::styled(
-        format!(" {title} ({})", files.len()),
+        format!("{title} ({})", files.len()),
         Style::default().fg(theme.section_title),
     )));
 
@@ -208,7 +201,7 @@ fn render_file_section(
         let mut spans: Vec<Span> = Vec::new();
 
         // Status indicator — aligned with section title (1 space indent)
-        let status_text = format!(" {} ", entry.status);
+        let status_text = entry.status.to_string();
         spans.push(Span::styled(
             status_text.clone(),
             Style::default().fg(status_color),
@@ -230,16 +223,18 @@ fn render_file_section(
             let s_del = format!("-{}", entry.deletions);
             diff_w += display_width(&s_del);
             diff_spans.push(Span::styled(s_del, Style::default().fg(theme.diff_deleted)));
-
-            diff_w += 1; // trailing space
-            diff_spans.push(Span::raw(" "));
         }
 
-        // Filename (truncated to fit, with margin before change stats)
-        let margin = if diff_w > 0 { 2 } else { 0 }; // gap between name and stats
-        let max_name_w = inner_w.saturating_sub(status_w + diff_w + margin);
+        // Filename (truncated to fit, with a single gap before change stats)
+        let max_name_w = if diff_w > 0 {
+            inner_w.saturating_sub(status_w + diff_w + 2)
+        } else {
+            inner_w.saturating_sub(status_w + 1)
+        };
         let truncated_name = truncate_to_width(&entry.name, max_name_w);
         let name_w = display_width(&truncated_name);
+
+        spans.push(Span::raw(" "));
 
         spans.push(Span::styled(
             truncated_name,
@@ -247,7 +242,8 @@ fn render_file_section(
         ));
 
         if !diff_spans.is_empty() {
-            let gap = pad_to(status_w + name_w + diff_w, inner_w);
+            spans.push(Span::raw(" "));
+            let gap = pad_to(status_w + 1 + name_w + 1 + diff_w, inner_w);
             spans.push(Span::raw(gap));
             spans.extend(diff_spans);
         }
@@ -279,15 +275,16 @@ fn render_untracked_section(
     }
 
     lines.push(Line::from(Span::styled(
-        format!(" Untracked ({})", files.len()),
+        format!("Untracked ({})", files.len()),
         Style::default().fg(theme.section_title),
     )));
 
     for name in files.iter().take(MAX_CHANGED_FILES) {
-        let max_name_w = inner_w.saturating_sub(3); // " U " prefix
+        let max_name_w = inner_w.saturating_sub(2); // "? " prefix
         let truncated_name = truncate_to_width(name, max_name_w);
         lines.push(Line::from(vec![
-            Span::styled(" ? ", Style::default().fg(theme.text_muted)),
+            Span::styled("?", Style::default().fg(theme.text_muted)),
+            Span::raw(" "),
             Span::styled(truncated_name, Style::default().fg(theme.text_muted)),
         ]));
     }
@@ -339,7 +336,7 @@ pub(super) fn draw_git_content(frame: &mut Frame, state: &mut AppState, inner: R
             .hyperlink_overlays
             .push(crate::state::HyperlinkOverlay {
                 x: inner.x + info.x_offset,
-                y: inner.y,
+                y: inner.y + 1,
                 text: info.text,
                 url: info.url,
             });
@@ -424,8 +421,8 @@ mod tests {
         state.git.branch = "main".into();
         state.git.pr_number = Some("5".into());
         let (lines, _) = render_git_header(&state, 30);
-        let spans = &lines[0].spans;
-        let pr_span = spans.iter().find(|s| s.content.contains('#')).unwrap();
+        let spans = &lines[1].spans;
+        let pr_span = spans.iter().find(|s| s.content.as_ref() == "#5").unwrap();
         assert_eq!(pr_span.content.as_ref(), "#5");
         assert!(pr_span.style.add_modifier.contains(Modifier::UNDERLINED));
     }
@@ -472,8 +469,8 @@ mod tests {
         let width = 30;
         let (_, pr_link) = render_git_header(&state, width);
         let info = pr_link.unwrap();
-        // PR text "#7" is 2 chars wide + 1 trailing space = 3, so x_offset = 30 - 3 = 27
-        let pr_display_w = display_width(&info.text) + 1; // +1 for trailing space
+        // PR text "#7" is 2 chars wide, so x_offset = 30 - 2 = 28.
+        let pr_display_w = display_width(&info.text);
         assert_eq!(info.x_offset as usize, width - pr_display_w);
     }
 
@@ -485,7 +482,7 @@ mod tests {
         state.git.pr_number = Some("7".into());
 
         let (lines, _) = render_git_header(&state, 40);
-        insta::assert_snapshot!(line_visual(&lines[0]), @"·main···························↑2↓1·#7·");
+        insta::assert_snapshot!(line_visual(&lines[1]), @"main·····························↑2↓1·#7");
     }
 
     #[test]
@@ -495,7 +492,7 @@ mod tests {
         state.git.ahead_behind = Some((2, 1));
 
         let (lines, _) = render_git_header(&state, 40);
-        insta::assert_snapshot!(line_visual(&lines[0]), @"·main······························↑2↓1·");
+        insta::assert_snapshot!(line_visual(&lines[1]), @"main································↑2↓1");
     }
 
     #[test]
@@ -506,7 +503,7 @@ mod tests {
         state.git.pr_number = Some("7".into());
 
         let (lines, _) = render_git_header(&state, 40);
-        let spans = &lines[0].spans;
+        let spans = &lines[1].spans;
         let two_pos = spans
             .iter()
             .position(|span| span.content.as_ref() == "2")
@@ -535,7 +532,7 @@ mod tests {
         state.git.pr_number = Some("7".into());
 
         let (lines, _) = render_git_header(&state, 32);
-        insta::assert_snapshot!(line_visual(&lines[0]), @"·feature/sidebar/real…··↑2↓1·#7·");
+        insta::assert_snapshot!(line_visual(&lines[1]), @"feature/sidebar/really…··↑2↓1·#7");
     }
 
     // ─── Section title color tests ───────────────────────────────
@@ -569,11 +566,22 @@ mod tests {
     #[test]
     fn more_indicator_right_aligned_untracked() {
         let theme = crate::ui::colors::ColorTheme::default();
-        let files: Vec<String> = (0..7).map(|i| format!("file{i}.tmp")).collect();
+        let files: Vec<String> = (0..11).map(|i| format!("file{i}.tmp")).collect();
         let lines = render_untracked_section(&files, 30, &theme);
         let more_line = lines.last().unwrap();
         let text = line_text(more_line);
-        assert!(text.contains("+2 more"));
+        assert_eq!(text.trim(), "+1 more");
+        assert_eq!(display_width(&text), 30);
+    }
+
+    #[test]
+    fn more_indicator_right_aligned_untracked_overflow_two() {
+        let theme = crate::ui::colors::ColorTheme::default();
+        let files: Vec<String> = (0..12).map(|i| format!("file{i}.tmp")).collect();
+        let lines = render_untracked_section(&files, 30, &theme);
+        let more_line = lines.last().unwrap();
+        let text = line_text(more_line);
+        assert_eq!(text.trim(), "+2 more");
         assert_eq!(display_width(&text), 30);
     }
 
@@ -586,7 +594,7 @@ mod tests {
         state.git.diff_stat = Some((1, 0));
         let (lines, _) = render_git_header(&state, 40);
         assert_eq!(lines.len(), 4);
-        assert!(line_text(&lines[1]).is_empty());
+        assert!(line_text(&lines[0]).is_empty());
     }
 
     #[test]
@@ -594,7 +602,38 @@ mod tests {
         let mut state = crate::state::AppState::new(String::new());
         state.git.branch = "main".into();
         let (lines, _) = render_git_header(&state, 40);
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 3);
+        assert!(line_text(&lines[0]).is_empty());
+    }
+
+    #[test]
+    fn header_diff_summary_is_tight() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.diff_stat = Some((10, 3));
+        let (lines, _) = render_git_header(&state, 40);
+        assert_eq!(
+            line_text(&lines[2]),
+            "+10/-3                           0 files"
+        );
+    }
+
+    #[test]
+    fn header_diff_summary_tight_with_file_count_only() {
+        let mut state = crate::state::AppState::new(String::new());
+        state.git.branch = "main".into();
+        state.git.staged_files = vec![crate::git::GitFileEntry {
+            status: 'A',
+            name: "new.rs".into(),
+            additions: 1,
+            deletions: 0,
+            path: String::new(),
+        }];
+        let (lines, _) = render_git_header(&state, 40);
+        assert_eq!(
+            line_text(&lines[2]),
+            "                                 1 files"
+        );
     }
 
     // ─── Edge case: truncation & narrow width ────────────────────
@@ -611,8 +650,7 @@ mod tests {
         }];
         let lines = render_file_section("Staged", &files, 40, &theme, true);
         let file_text = line_text(&lines[1]);
-        assert!(file_text.contains("medium-length-name.rs"));
-        assert!(!file_text.contains('…'));
+        assert_eq!(file_text, "M medium-length-name.rs");
     }
 
     #[test]
@@ -622,7 +660,7 @@ mod tests {
         let lines = render_untracked_section(&files, 25, &theme);
         let file_text = line_text(&lines[1]);
         assert!(display_width(&file_text) <= 25);
-        assert!(file_text.contains('…'));
+        assert_eq!(file_text, "? a-very-long-untracked-…");
     }
 
     #[test]
@@ -638,7 +676,7 @@ mod tests {
         let lines = render_file_section("Staged", &files, 20, &theme, true);
         let file_text = line_text(&lines[1]);
         assert!(display_width(&file_text) <= 20);
-        assert!(file_text.contains("+100/-50"));
+        assert_eq!(file_text, "A index.tsx +100/-50");
     }
 
     #[test]

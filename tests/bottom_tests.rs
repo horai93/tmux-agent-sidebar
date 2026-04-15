@@ -118,14 +118,14 @@ fn snapshot_git_status_tab_ui() {
     ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
-    │ feature/sidebar     ↑2↓1 │
-    │ +42/-15          3 files │
+    │feature/sidebar       ↑2↓1│
+    │+42/-15            3 files│
     │──────────────────────────│
-    │ Unstaged (2)             │
-    │ M src/ui/panes…  +30/-10 │
-    │ M src/state.rs    +12/-5 │
-    │ Untracked (1)            │
-    │ ? new_file.rs            │
+    │Unstaged (2)              │
+    │M src/ui/panes.rs  +30/-10│
+    │M src/state.rs      +12/-5│
+    │Untracked (1)             │
+    │? new_file.rs             │
     ╰──────────────────────────╯
     ");
 }
@@ -197,6 +197,48 @@ fn snapshot_activity_tab_active_ui() {
     │  src/main.rs             │
     ╰──────────────────────────╯
     ");
+}
+
+#[test]
+fn activity_tab_leaves_one_blank_row_above_entries() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+
+    state.bottom_tab = BottomTab::Activity;
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.activity_entries = vec![ActivityEntry {
+        timestamp: "10:32".into(),
+        tool: "Edit".into(),
+        label: "src/main.rs".into(),
+    }];
+
+    let styled = render_to_styled_string(&mut state, 28, 24);
+    let lines: Vec<&str> = styled.lines().collect();
+    let title_idx = lines
+        .iter()
+        .position(|line| line.contains('╭'))
+        .expect("bottom title line should be present");
+    assert_eq!(
+        lines[title_idx + 1].contains("E[fg:180]"),
+        false,
+        "the first content row after the title should be blank"
+    );
+    assert!(
+        lines[title_idx + 2].contains("E[fg:180]"),
+        "activity content should start one row below the blank spacer"
+    );
 }
 
 #[test]
@@ -280,14 +322,132 @@ fn snapshot_git_full_info_ui() {
     ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │ +120/-30         3 files │
+    │main                      │
+    │+120/-30           3 files│
     │──────────────────────────│
-    │ Unstaged (2)             │
-    │ M src/state.rs   +42/-10 │
-    │ M src/ui/botto…  +85/-20 │
-    │ Untracked (1)            │
-    │ ? new_file.rs            │
+    │Unstaged (2)              │
+    │M src/state.rs     +42/-10│
+    │M src/ui/bottom.rs +85/-20│
+    │Untracked (1)             │
+    │? new_file.rs             │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_git_diff_summary_tight_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+
+    state.bottom_tab = BottomTab::GitStatus;
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.git.branch = "main".into();
+    state.git.diff_stat = Some((10, 3));
+
+    let plain = render_to_string(&mut state, 28, 14);
+    insta::assert_snapshot!(plain, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+    ╭ Activity │ Git ──────────╮
+    │main                      │
+    │+10/-3             0 files│
+    │──────────────────────────│
+    │    Working tree clean    │
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_git_staged_file_diff_right_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+
+    state.bottom_tab = BottomTab::GitStatus;
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.git.branch = "main".into();
+    state.git.diff_stat = Some((10, 2));
+    state.git.staged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
+        status: 'M',
+        name: "app.rs".into(),
+        additions: 10,
+        deletions: 2,
+        path: String::new(),
+    }];
+
+    let plain = render_to_string(&mut state, 28, 18);
+    insta::assert_snapshot!(plain, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+    ╭ Activity │ Git ──────────╮
+    │main                      │
+    │+10/-2             1 files│
+    │──────────────────────────│
+    │Staged (1)                │
+    │M app.rs            +10/-2│
+    ╰──────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_git_unstaged_long_name_diff_right_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+
+    state.bottom_tab = BottomTab::GitStatus;
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.git.branch = "main".into();
+    state.git.diff_stat = Some((150, 50));
+    state.git.unstaged_files = vec![tmux_agent_sidebar::git::GitFileEntry {
+        status: 'M',
+        name: "very-long-filename-that-should-be-truncated.rs".into(),
+        additions: 150,
+        deletions: 50,
+        path: String::new(),
+    }];
+
+    let plain = render_to_string(&mut state, 28, 18);
+    insta::assert_snapshot!(plain, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+    ╭ Activity │ Git ──────────╮
+    │main                      │
+    │+150/-50           1 files│
+    │──────────────────────────│
+    │Unstaged (1)              │
+    │M very-long-file… +150/-50│
     ╰──────────────────────────╯
     ");
 }
@@ -336,12 +496,12 @@ fn snapshot_git_long_filename_truncated_ui() {
     ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │                  2 files │
+    │main                      │
+    │                   2 files│
     │──────────────────────────│
-    │ Unstaged (2)             │
-    │ M very-long-f…  +150/-50 │
-    │ M short.rs         +8/-2 │
+    │Unstaged (2)              │
+    │M very-long-file… +150/-50│
+    │M short.rs           +8/-2│
     ╰──────────────────────────╯
     ");
 }
@@ -426,20 +586,21 @@ fn snapshot_git_more_than_5_files() {
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │                  7 files │
+    │main                      │
+    │                   7 files│
     │──────────────────────────│
-    │ Unstaged (7)             │
-    │ M a.rs           +100/-0 │
-    │ M b.rs            +80/-0 │
-    │ M c.rs            +60/-0 │
-    │ M d.rs            +40/-0 │
-    │ M e.rs            +20/-0 │
-    │                  +2 more │
+    │Unstaged (7)              │
+    │M a.rs             +100/-0│
+    │M b.rs              +80/-0│
+    │M c.rs              +60/-0│
+    │M d.rs              +40/-0│
+    │M e.rs              +20/-0│
+    │M f.rs              +10/-0│
+    │M g.rs               +5/-0│
     ╰──────────────────────────╯
     ");
 
-    // Scroll to bottom to verify "+2 more" exists
+    // Scroll to bottom; no overflow at 7 files with a 10-file cap.
     state.git_scroll.offset = 5;
     let scrolled = render_to_string(&mut state, 28, 40);
     insta::assert_snapshot!(scrolled, @"
@@ -448,11 +609,12 @@ fn snapshot_git_more_than_5_files() {
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │                  7 files │
+    │main                      │
+    │                   7 files│
     │──────────────────────────│
-    │ M e.rs            +20/-0 │
-    │                  +2 more │
+    │M e.rs              +20/-0│
+    │M f.rs              +10/-0│
+    │M g.rs               +5/-0│
     ╰──────────────────────────╯
     ");
 }
@@ -483,7 +645,7 @@ fn snapshot_git_branch_only_no_changes() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ────────────────────╮
-    │ feature/long-branch-name        ↑5 │
+    │feature/long-branch-name          ↑5│
     │────────────────────────────────────│
     │         Working tree clean         │
     ╰────────────────────────────────────╯
@@ -520,8 +682,8 @@ fn snapshot_git_pr_number_ui() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ──────────╮
-    │ feature/fix          #42 │
-    │ +10/-3           0 files │
+    │feature/fix            #42│
+    │+10/-3             0 files│
     │──────────────────────────│
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -572,8 +734,8 @@ fn snapshot_git_pr_with_diff_ui() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ──────────╮
-    │ main                #123 │
-    │ +55/-20          0 files │
+    │main                  #123│
+    │+55/-20            0 files│
     │──────────────────────────│
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -748,7 +910,7 @@ fn snapshot_git_branch_loaded_no_changes_shows_inline_clean() {
     ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
-    │ main                     │
+    │main                      │
     │──────────────────────────│
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -816,7 +978,7 @@ fn test_git_behind_only() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ──────────╮
-    │ main                  ↓3 │
+    │main                    ↓3│
     │──────────────────────────│
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -849,7 +1011,7 @@ fn test_git_ahead_and_behind() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ────────────────────╮
-    │ main                          ↑2↓3 │
+    │main                            ↑2↓3│
     │────────────────────────────────────│
     │         Working tree clean         │
     ╰────────────────────────────────────╯
@@ -884,8 +1046,8 @@ fn test_git_diff_insertions_only() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │ +25/-0           0 files │
+    │main                      │
+    │+25/-0             0 files│
     │──────────────────────────│
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -918,8 +1080,8 @@ fn test_git_diff_deletions_only() {
     insta::assert_snapshot!(plain, @"
      ≡1  ●1  ◐0  ○0  ✕0
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │ +0/-15           0 files │
+    │main                      │
+    │+0/-15             0 files│
     │──────────────────────────│
     │    Working tree clean    │
     ╰──────────────────────────╯
@@ -1022,16 +1184,16 @@ fn snapshot_git_staged_unstaged_untracked_ui() {
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
-    │ main                  #5 │
-    │ +12/-3           4 files │
+    │main                    #5│
+    │+12/-3             4 files│
     │──────────────────────────│
-    │ Staged (2)               │
-    │ M app.rs          +10/-2 │
-    │ A new.rs           +2/-0 │
-    │ Unstaged (1)             │
-    │ M config.toml      +0/-1 │
-    │ Untracked (1)            │
-    │ ? debug.log              │
+    │Staged (2)                │
+    │M app.rs            +10/-2│
+    │A new.rs             +2/-0│
+    │Unstaged (1)              │
+    │M config.toml        +0/-1│
+    │Untracked (1)             │
+    │? debug.log               │
     ╰──────────────────────────╯
     ");
 }
@@ -1072,11 +1234,11 @@ fn snapshot_git_long_branch_with_pr_ui() {
     ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
-    │ feature/very-long-… #123 │
-    │ +5/-2            1 files │
+    │feature/very-long-br… #123│
+    │+5/-2              1 files│
     │──────────────────────────│
-    │ Unstaged (1)             │
-    │ M main.rs          +5/-2 │
+    │Unstaged (1)              │
+    │M main.rs            +5/-2│
     ╰──────────────────────────╯
     ");
     assert_right_border_intact(&output);
@@ -1117,11 +1279,11 @@ fn snapshot_git_staged_only_ui() {
     ⓘ                        — ▾
     project
     ╭ Activity │ Git ──────────╮
-    │ main                     │
-    │ +20/-0           1 files │
+    │main                      │
+    │+20/-0             1 files│
     │──────────────────────────│
-    │ Staged (1)               │
-    │ A new_feature.rs  +20/-0 │
+    │Staged (1)                │
+    │A new_feature.rs    +20/-0│
     ╰──────────────────────────╯
     ");
 }
@@ -1163,16 +1325,74 @@ fn snapshot_git_many_files_more_indicator_ui() {
     project
     ┃ ● claude
     ╭ Activity │ Git ──────────╮
-    │ dev                      │
-    │                  7 files │
+    │dev                       │
+    │                   7 files│
     │──────────────────────────│
-    │ Unstaged (7)             │
-    │ M f0.rs            +1/-0 │
-    │ M f1.rs            +1/-0 │
-    │ M f2.rs            +1/-0 │
-    │ M f3.rs            +1/-0 │
-    │ M f4.rs            +1/-0 │
-    │                  +2 more │
+    │Unstaged (7)              │
+    │M f0.rs              +1/-0│
+    │M f1.rs              +1/-0│
+    │M f2.rs              +1/-0│
+    │M f3.rs              +1/-0│
+    │M f4.rs              +1/-0│
+    │M f5.rs              +1/-0│
+    │M f6.rs              +1/-0│
+    ╰──────────────────────────╯
+    ");
+    assert_right_border_intact(&output);
+}
+
+#[test]
+fn snapshot_git_more_than_10_files_ui() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Running);
+    let mut state = make_state(vec![SessionInfo {
+        session_name: "main".into(),
+        windows: vec![WindowInfo {
+            window_id: "@1".into(),
+            window_name: "project".into(),
+            window_active: true,
+            auto_rename: false,
+            panes: vec![pane.clone()],
+        }],
+    }]);
+    state.repo_groups = vec![make_repo_group("project", vec![pane])];
+    state.rebuild_row_targets();
+
+    state.bottom_tab = BottomTab::GitStatus;
+    state.focus = Focus::ActivityLog;
+    state.sidebar_focused = true;
+    state.git.branch = "dev".into();
+    state.git.unstaged_files = (0..12)
+        .map(|i| tmux_agent_sidebar::git::GitFileEntry {
+            status: 'M',
+            name: format!("f{i}.rs"),
+            additions: 1,
+            deletions: 0,
+            path: String::new(),
+        })
+        .collect();
+
+    let output = render_to_string(&mut state, 28, 30);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●1  ◐0  ○0  ✕0
+    ⓘ                        — ▾
+    project
+    ┃ ● claude
+    ╭ Activity │ Git ──────────╮
+    │dev                       │
+    │                  12 files│
+    │──────────────────────────│
+    │Unstaged (12)             │
+    │M f0.rs              +1/-0│
+    │M f1.rs              +1/-0│
+    │M f2.rs              +1/-0│
+    │M f3.rs              +1/-0│
+    │M f4.rs              +1/-0│
+    │M f5.rs              +1/-0│
+    │M f6.rs              +1/-0│
+    │M f7.rs              +1/-0│
+    │M f8.rs              +1/-0│
+    │M f9.rs              +1/-0│
+    │                   +2 more│
     ╰──────────────────────────╯
     ");
     assert_right_border_intact(&output);

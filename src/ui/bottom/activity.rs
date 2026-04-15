@@ -20,6 +20,9 @@ pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inn
     let mut lines: Vec<Line<'_>> = Vec::new();
     let inner_w = inner.width as usize;
 
+    // Leave one blank row above the first activity entry for breathing room.
+    lines.push(Line::from(""));
+
     for entry in &state.activity_entries {
         let tool_color = Color::Indexed(entry.tool_color_index());
 

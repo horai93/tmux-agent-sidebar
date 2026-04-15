@@ -30,7 +30,7 @@ fn snapshot_selected_focused_styled() {
     let output = render_to_styled_string(&mut state, 28, 10);
     // Verify the selected agent row gets the selection background style.
     assert!(
-        output.lines().any(|l| l.starts_with("┃[fg:153,bg:237]")),
+        output.lines().any(|l| l.starts_with("┃[fg:153,bg:239]")),
         "selected focused row should have selection background color"
     );
 }
@@ -191,11 +191,11 @@ fn selection_marker_uses_accent_color_with_selection_bg() {
     let output = render_to_styled_string(&mut state, 28, 24);
 
     // Selected pane rows start with the ┃ marker styled with the
-    // accent fg (117) and the selection bg (237), and NEVER contain
+    // accent fg (117) and the selection bg (239), and NEVER contain
     // the old group frame │.
     let selected_lines: Vec<&str> = output
         .lines()
-        .filter(|l| l.starts_with("┃") && l.contains("bg:237"))
+        .filter(|l| l.starts_with("┃") && l.contains("bg:239"))
         .collect();
 
     assert!(
@@ -205,7 +205,7 @@ fn selection_marker_uses_accent_color_with_selection_bg() {
 
     for line in &selected_lines {
         assert!(
-            line.starts_with("┃[fg:153,bg:237]"),
+            line.starts_with("┃[fg:153,bg:239]"),
             "selected row must start with the ┃ marker in accent+selection styles: {}",
             line
         );
@@ -240,14 +240,14 @@ fn selection_bg_covers_inner_padding() {
 
     let selected_lines: Vec<&str> = output
         .lines()
-        .filter(|l| l.starts_with("┃") && l.contains("bg:237"))
+        .filter(|l| l.starts_with("┃") && l.contains("bg:239"))
         .collect();
 
     for line in &selected_lines {
-        // The space right after the left │ should have bg:237
-        // Pattern: │[fg:153] [bg:237]
+        // The space right after the left │ should have bg:239
+        // Pattern: │[fg:153] [bg:239]
         assert!(
-            line.contains(" [bg:237]"),
+            line.contains(" [bg:239]"),
             "inner space should have selection bg: {}",
             line
         );
@@ -276,7 +276,7 @@ fn no_selection_bg_when_not_selected() {
     assert!(
         !output
             .lines()
-            .any(|l| l.starts_with("┃") && l.contains("bg:237")),
+            .any(|l| l.starts_with("┃") && l.contains("bg:239")),
         "should not have selection bg on agent rows when sidebar is not focused"
     );
 }
@@ -344,7 +344,7 @@ fn test_theme_default_matches_shell_colors() {
     assert_eq!(theme.status_running, Color::Indexed(114));
     assert_eq!(theme.status_waiting, Color::Indexed(221));
     assert_eq!(theme.status_idle, Color::Indexed(110));
-    assert_eq!(theme.status_error, Color::Indexed(203));
+    assert_eq!(theme.status_error, Color::Indexed(167));
     assert_eq!(theme.agent_claude, Color::Indexed(174));
     assert_eq!(theme.agent_codex, Color::Indexed(141));
     assert_eq!(theme.text_active, Color::Indexed(255));

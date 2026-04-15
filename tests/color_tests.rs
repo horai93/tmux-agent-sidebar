@@ -17,14 +17,14 @@ fn test_all_color_theme_defaults() {
     // Core UI colors
     assert_eq!(theme.accent, Color::Indexed(153));
     assert_eq!(theme.border_inactive, Color::Indexed(240));
-    assert_eq!(theme.selection_bg, Color::Indexed(237));
+    assert_eq!(theme.selection_bg, Color::Indexed(239));
 
     // Status colors
     assert_eq!(theme.status_all, Color::Indexed(111));
     assert_eq!(theme.status_running, Color::Indexed(114));
     assert_eq!(theme.status_waiting, Color::Indexed(221));
     assert_eq!(theme.status_idle, Color::Indexed(110));
-    assert_eq!(theme.status_error, Color::Indexed(203));
+    assert_eq!(theme.status_error, Color::Indexed(167));
     assert_eq!(theme.status_unknown, Color::Indexed(244));
 
     // Agent colors
@@ -43,7 +43,7 @@ fn test_all_color_theme_defaults() {
     assert_eq!(theme.branch, Color::Indexed(109));
 
     // New theme fields
-    assert_eq!(theme.badge_danger, Color::Indexed(203));
+    assert_eq!(theme.badge_danger, Color::Indexed(167));
     assert_eq!(theme.badge_auto, Color::Indexed(221));
     assert_eq!(theme.task_progress, Color::Indexed(223));
     assert_eq!(theme.subagent, Color::Indexed(73));
@@ -74,7 +74,7 @@ fn test_status_color_all_variants() {
     );
     assert_eq!(
         theme.status_color(&PaneStatus::Error, false),
-        Color::Indexed(203)
+        Color::Indexed(167)
     );
     assert_eq!(
         theme.status_color(&PaneStatus::Unknown, false),
@@ -136,10 +136,10 @@ fn test_permission_mode_bypass_all_renders_danger_color() {
     state.sidebar_focused = false;
 
     let output = render_to_styled_string(&mut state, 28, 26);
-    // BypassAll badge uses badge_danger (203)
+    // BypassAll badge uses badge_danger (167)
     assert!(
-        output.contains("fg:203"),
-        "BypassAll badge should use badge_danger color (203)"
+        output.contains("fg:167"),
+        "BypassAll badge should use badge_danger color (167)"
     );
     // Badge text "!" should appear
     let plain = render_to_string(&mut state, 28, 26);
@@ -634,10 +634,10 @@ fn test_selection_bg_color_applied() {
     state.global.selected_pane_row = 0;
 
     let styled = render_to_styled_string(&mut state, 28, 25);
-    // selection_bg is 237
+    // selection_bg is 239
     assert!(
-        styled.contains("bg:237"),
-        "Selected row should use selection_bg color (237)"
+        styled.contains("bg:239"),
+        "Selected row should use selection_bg color (239)"
     );
 }
 
@@ -760,10 +760,10 @@ fn test_error_status_color_in_output() {
     state.bottom_panel_height = 0;
 
     let styled = render_to_styled_string(&mut state, 28, 25);
-    // Error status color is 203
+    // Error status color is 167
     assert!(
-        styled.contains("fg:203"),
-        "Error status should use status_error color (203)"
+        styled.contains("fg:167"),
+        "Error status should use status_error color (167)"
     );
 }
 
