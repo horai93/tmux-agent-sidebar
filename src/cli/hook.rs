@@ -1,5 +1,6 @@
 use crate::event::{AgentEvent, WorktreeInfo, resolve_adapter};
 use crate::tmux;
+use crate::{desktop_notification, desktop_notification::DesktopNotificationKind};
 
 use super::label::extract_tool_label;
 use super::{
@@ -267,12 +268,12 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
         return 0;
     };
 
-    handle_event(&pane, event)
+    handle_event(&pane, agent_name, event)
 }
 
 // ─── event handler ──────────────────────────────────────────────────────────
 
-fn handle_event(pane: &str, event: AgentEvent) -> i32 {
+fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
     match event {
         AgentEvent::SessionStart {
             agent,
@@ -361,17 +362,21 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => on_stop_failure(
-            pane,
-            &AgentContext {
-                agent: &agent,
-                cwd: &cwd,
-                permission_mode: &permission_mode,
-                worktree: &worktree,
-                session_id: &session_id,
-            },
-            &error,
-        ),
+        } => {
+            let notifications = notification_settings();
+            on_stop_failure(
+                pane,
+                &AgentContext {
+                    agent: &agent,
+                    cwd: &cwd,
+                    permission_mode: &permission_mode,
+                    worktree: &worktree,
+                    session_id: &session_id,
+                },
+                &error,
+                &notifications,
+            )
+        }
         AgentEvent::SubagentStart {
             agent_type,
             agent_id,
@@ -389,16 +394,20 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             worktree,
             session_id,
             ..
-        } => on_permission_denied(
-            pane,
-            &AgentContext {
-                agent: &agent,
-                cwd: &cwd,
-                permission_mode: &permission_mode,
-                worktree: &worktree,
-                session_id: &session_id,
-            },
-        ),
+        } => {
+            let notifications = notification_settings();
+            on_permission_denied(
+                pane,
+                &AgentContext {
+                    agent: &agent,
+                    cwd: &cwd,
+                    permission_mode: &permission_mode,
+                    worktree: &worktree,
+                    session_id: &session_id,
+                },
+                &notifications,
+            )
+        }
         AgentEvent::CwdChanged {
             cwd,
             worktree,
@@ -409,9 +418,13 @@ fn handle_event(pane: &str, event: AgentEvent) -> i32 {
             0
         }
         AgentEvent::TaskCreated { .. } => 0,
-        AgentEvent::TaskCompleted { .. } => {
+        AgentEvent::TaskCompleted {
+            task_id,
+            task_subject,
+        } => {
             set_attention(pane, "notification");
-            0
+            let notifications = notification_settings();
+            on_task_completed(pane, agent_name, &task_id, &task_subject, &notifications)
         }
         AgentEvent::TeammateIdle { teammate_name, .. } => on_teammate_idle(pane, &teammate_name),
         AgentEvent::WorktreeCreate => 0,
@@ -426,10 +439,18 @@ fn now_epoch_secs() -> u64 {
         .unwrap_or(0)
 }
 
+fn now_epoch_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn on_session_start(pane: &str, ctx: &AgentContext<'_>) -> i32 {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
+    set_notification_run_id(pane);
     tmux::unset_pane_option(pane, "@pane_prompt");
     tmux::unset_pane_option(pane, "@pane_prompt_source");
     tmux::unset_pane_option(pane, "@pane_subagents");
@@ -461,6 +482,7 @@ fn on_user_prompt_submit(pane: &str, ctx: &AgentContext<'_>, prompt: &str) -> i3
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     set_status(pane, "running");
+    set_notification_run_id(pane);
     if !prompt.is_empty() && !is_system_message(prompt) {
         let p = sanitize_tmux_value(prompt);
         tmux::set_pane_option(pane, "@pane_prompt", &p);
@@ -501,7 +523,12 @@ fn on_stop(pane: &str, ctx: &AgentContext<'_>, last_message: &str, response: Opt
     0
 }
 
-fn on_stop_failure(pane: &str, ctx: &AgentContext<'_>, error: &str) -> i32 {
+fn on_stop_failure(
+    pane: &str,
+    ctx: &AgentContext<'_>,
+    error: &str,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
@@ -510,6 +537,20 @@ fn on_stop_failure(pane: &str, ctx: &AgentContext<'_>, error: &str) -> i32 {
         tmux::set_pane_option(pane, "@pane_wait_reason", error);
     }
     set_status(pane, "error");
+    let fingerprint = desktop_notification::run_scoped_fingerprint(
+        notification_run_id(pane),
+        stop_failure_fingerprint(error),
+    );
+    let repo = repo_label_from_ctx(ctx);
+    let body = stop_failure_body(error);
+    let _ = notify_desktop(
+        pane,
+        DesktopNotificationKind::TaskFailed,
+        notifications,
+        &fingerprint,
+        &desktop_notification::format_title(repo.as_deref(), ctx.agent),
+        &body,
+    );
     0
 }
 
@@ -564,11 +605,28 @@ fn on_subagent_stop(pane: &str, agent_id: Option<&str>) -> i32 {
     0
 }
 
-fn on_permission_denied(pane: &str, ctx: &AgentContext<'_>) -> i32 {
+fn on_permission_denied(
+    pane: &str,
+    ctx: &AgentContext<'_>,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
     set_agent_meta(pane, ctx);
     set_status(pane, "waiting");
     set_attention(pane, "notification");
     tmux::set_pane_option(pane, "@pane_wait_reason", "permission_denied");
+    let repo = repo_label_from_ctx(ctx);
+    let fingerprint = desktop_notification::run_scoped_fingerprint(
+        notification_run_id(pane),
+        "permission_denied",
+    );
+    let _ = notify_desktop(
+        pane,
+        DesktopNotificationKind::PermissionRequired,
+        &notifications,
+        &fingerprint,
+        &desktop_notification::format_title(repo.as_deref(), ctx.agent),
+        "Permission required",
+    );
     0
 }
 
@@ -592,6 +650,123 @@ fn on_worktree_remove(pane: &str) -> i32 {
     }
     run_worktree_remove_teardown(pane);
     0
+}
+
+fn on_task_completed(
+    pane: &str,
+    agent_name: &str,
+    task_id: &str,
+    task_subject: &str,
+    notifications: &desktop_notification::DesktopNotificationSettings,
+) -> i32 {
+    let fingerprint = desktop_notification::run_scoped_fingerprint(
+        notification_run_id(pane),
+        task_completed_fingerprint(task_id, task_subject),
+    );
+    let repo = repo_label_from_pane(pane);
+    let body = task_completed_body(task_subject);
+    let _ = notify_desktop(
+        pane,
+        DesktopNotificationKind::TaskCompleted,
+        notifications,
+        &fingerprint,
+        &desktop_notification::format_title(repo.as_deref(), agent_name),
+        &body,
+    );
+    0
+}
+
+fn notify_desktop(
+    pane: &str,
+    kind: DesktopNotificationKind,
+    settings: &desktop_notification::DesktopNotificationSettings,
+    fingerprint: &str,
+    title: &str,
+    body: &str,
+) -> bool {
+    desktop_notification::notify_if_allowed(settings, pane, kind, fingerprint, title, body)
+}
+
+fn notification_settings() -> desktop_notification::DesktopNotificationSettings {
+    desktop_notification::DesktopNotificationSettings::from_tmux()
+}
+
+fn set_notification_run_id(pane: &str) {
+    tmux::set_pane_option(
+        pane,
+        "@pane_notification_run_id",
+        &now_epoch_millis().to_string(),
+    );
+}
+
+fn notification_run_id(pane: &str) -> Option<u64> {
+    tmux::get_pane_option_value(pane, "@pane_notification_run_id")
+        .parse::<u64>()
+        .ok()
+}
+
+fn task_completed_fingerprint<'a>(task_id: &'a str, task_subject: &'a str) -> &'a str {
+    if !task_id.is_empty() {
+        task_id
+    } else if !task_subject.is_empty() {
+        task_subject
+    } else {
+        "task-completed"
+    }
+}
+
+fn task_completed_body(task_subject: &str) -> String {
+    if task_subject.is_empty() {
+        "Task completed".to_string()
+    } else {
+        format!("Task completed: {task_subject}")
+    }
+}
+
+fn stop_failure_fingerprint(error: &str) -> &str {
+    if error.is_empty() {
+        "task-failed"
+    } else {
+        error
+    }
+}
+
+fn stop_failure_body(error: &str) -> String {
+    if error.is_empty() {
+        "Task failed".to_string()
+    } else {
+        format!("Task failed: {error}")
+    }
+}
+
+fn repo_label_from_ctx(ctx: &AgentContext<'_>) -> Option<String> {
+    let cwd = resolve_cwd(ctx.cwd, ctx.worktree);
+    repo_label_from_path(cwd)
+}
+
+fn repo_label_from_pane(pane: &str) -> Option<String> {
+    let cwd = tmux::get_pane_option_value(pane, "@pane_cwd");
+    if !cwd.is_empty() {
+        return repo_label_from_path(&cwd);
+    }
+    let worktree = tmux::get_pane_option_value(pane, "@pane_worktree_name");
+    if !worktree.is_empty() {
+        return Some(worktree);
+    }
+    None
+}
+
+fn repo_label_from_path(path: &str) -> Option<String> {
+    let trimmed = path.trim_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let label = trimmed.rsplit('/').next().unwrap_or(trimmed).trim();
+    if label.is_empty() {
+        None
+    } else {
+        Some(label.to_string())
+    }
 }
 
 // ─── activity-log logic ─────────────────────────────────────────────────────
@@ -672,6 +847,78 @@ mod tests {
             original_repo_dir: "".into(),
         };
         assert_eq!(resolve_cwd("/tmp/wt/src", &Some(wt)), "/tmp/wt/src");
+    }
+
+    #[test]
+    fn repo_label_from_ctx_prefers_worktree_original_repo_dir() {
+        let wt = Some(crate::event::WorktreeInfo {
+            name: "feat".into(),
+            path: "/tmp/wt".into(),
+            branch: "feat".into(),
+            original_repo_dir: "/home/user/repo".into(),
+        });
+        let session_id = None;
+        let ctx = AgentContext {
+            agent: "claude",
+            cwd: "/tmp/wt/src",
+            permission_mode: "default",
+            worktree: &wt,
+            session_id: &session_id,
+        };
+        assert_eq!(repo_label_from_ctx(&ctx), Some("repo".into()));
+    }
+
+    #[test]
+    fn repo_label_from_pane_prefers_pane_cwd_then_worktree_name() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_REPO";
+        tmux::test_mock::set(pane, "@pane_cwd", "/home/user/app");
+        tmux::test_mock::set(pane, "@pane_worktree_name", "wt-name");
+
+        assert_eq!(repo_label_from_pane(pane), Some("app".into()));
+
+        tmux::test_mock::set(pane, "@pane_cwd", "");
+        assert_eq!(repo_label_from_pane(pane), Some("wt-name".into()));
+    }
+
+    #[test]
+    fn notification_run_id_reads_tmux_option() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_STARTED";
+        tmux::test_mock::set(pane, "@pane_notification_run_id", "1700000123456");
+        assert_eq!(notification_run_id(pane), Some(1_700_000_123_456));
+    }
+
+    #[test]
+    fn notification_task_completed_helpers_choose_expected_values() {
+        assert_eq!(task_completed_fingerprint("id-1", "subject"), "id-1");
+        assert_eq!(task_completed_fingerprint("", "subject"), "subject");
+        assert_eq!(task_completed_fingerprint("", ""), "task-completed");
+        assert_eq!(task_completed_body("subject"), "Task completed: subject");
+        assert_eq!(task_completed_body(""), "Task completed");
+    }
+
+    #[test]
+    fn notification_stop_failure_helpers_choose_expected_values() {
+        assert_eq!(stop_failure_fingerprint("boom"), "boom");
+        assert_eq!(stop_failure_fingerprint(""), "task-failed");
+        assert_eq!(stop_failure_body("boom"), "Task failed: boom");
+        assert_eq!(stop_failure_body(""), "Task failed");
+    }
+
+    #[test]
+    fn set_notification_run_id_writes_millis_value() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%PANE_SET_RUN_ID";
+        set_notification_run_id(pane);
+        let written = tmux::test_mock::get(pane, "@pane_notification_run_id");
+        assert!(
+            written
+                .as_deref()
+                .and_then(|s| s.parse::<u64>().ok())
+                .is_some(),
+            "expected a millisecond timestamp to be written"
+        );
     }
 
     // ─── append_subagent tests ──────────────────────────────────────
