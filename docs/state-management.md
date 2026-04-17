@@ -6,12 +6,14 @@ Every piece of state belongs to one of three scopes: **Global** (shared across a
 
 ### Global State (synced via tmux global variables)
 
-Stored in `GlobalState`. Written to tmux on change, reloaded on SIGUSR1.
+Stored in `GlobalState`. Written to tmux on change, with the cursor save
+debounced briefly so selection changes do not block redraw/input handling;
+reloaded on SIGUSR1.
 
 | Field | Tmux Variable | Update Trigger | Description |
 |-------|--------------|----------------|-------------|
 | `status_filter` | `@sidebar_filter` | User input (left/right key) | Active status filter (All/Running/Waiting/Idle/Error) |
-| `selected_pane_row` | `@sidebar_cursor` | User input (j/k key) | Cursor position in agent list |
+| `selected_pane_row` | `@sidebar_cursor` | User input (j/k key); tmux write flushed after a short debounce | Cursor position in agent list |
 | `repo_filter` | `@sidebar_repo_filter` | User input (repo popup) | Repository filter (All or specific repo) |
 
 Each field has a corresponding `last_saved_*` to prevent sync conflicts — only overwrites tmux if the local write succeeded.
@@ -69,10 +71,10 @@ Per-pane file-based state:
 | Field | Update Frequency | Description |
 |-------|-----------------|-------------|
 | `repo_groups` | Every 1s | Panes grouped by git repo root (built directly from `tmux::query_sessions()` output, not stored separately as a session list) |
-| `focused_pane_id` | Every 1s | Currently focused agent pane |
+| `focused_pane_id` | Every 1s, plus immediately on user-initiated pane jumps | Currently focused agent pane |
 | `sidebar_focused` | Every 1s | Whether sidebar pane itself has focus |
 | `now` | Every 1s | Current Unix epoch |
-| `focus` | On user input | UI focus: `Filter` / `Panes` / `ActivityLog` |
+| `focus` | On user input | UI focus: `Filter` / `Panes` / `ActivityLog`; input also triggers an immediate redraw so focus changes appear without waiting for the next poll tick |
 | `panes_scroll` | On user input / render | Agent list scroll position |
 | `activity_scroll` | On user input / render | Activity log scroll position |
 | `git_scroll` | On user input / render | Git status scroll position |
@@ -129,7 +131,8 @@ Per-pane file-based state:
 ├─────────────────────────────────────────────────────────────┤
 │  On user input                                              │
 │  focus, scroll offsets, bottom_tab, GlobalState fields,     │
-│  popup (PopupState enum), timers.last_filter_click          │
+│  popup (PopupState enum), timers.last_filter_click,         │
+│  immediate selection / active-pane redraw                   │
 ├─────────────────────────────────────────────────────────────┤
 │  Every frame (render)                                       │
 │  layout.line_to_row, popup.area (Repo/Notices variants),    │

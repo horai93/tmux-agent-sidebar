@@ -149,161 +149,171 @@ fn run_app(
     let spinner_interval = Duration::from_millis(200);
 
     loop {
-        terminal.draw(|frame| ui::draw(frame, &mut state))?;
-
-        // Write OSC 8 hyperlink overlays after frame render
-        write_hyperlink_overlays(terminal.backend_mut(), &state.layout.hyperlink_overlays)?;
-
-        // Flush any pending OSC 52 clipboard payload (set by notices copy).
-        if let Some(payload) = state.pending_osc52_copy.take() {
-            let seq = tmux_agent_sidebar::clipboard::osc52_sequence(&payload);
-            let backend = terminal.backend_mut();
-            use std::io::Write;
-            let _ = backend.write_all(seq.as_bytes());
-            let _ = backend.flush();
-        }
+        render_frame(terminal, &mut state)?;
 
         let refresh_timeout = refresh_interval.saturating_sub(last_refresh.elapsed());
         let spinner_timeout = spinner_interval.saturating_sub(last_spinner.elapsed());
-        let timeout = refresh_timeout.min(spinner_timeout);
+        let timeout = if NEEDS_REFRESH.load(Ordering::Relaxed) {
+            Duration::ZERO
+        } else {
+            refresh_timeout
+                .min(spinner_timeout)
+                .min(Duration::from_millis(16))
+        };
+        let mut needs_redraw = false;
         if event::poll(timeout)? {
             loop {
                 let ev = event::read()?;
                 match ev {
                     Event::Key(key) if state.is_notices_popup_open() => {
+                        needs_redraw = true;
                         if key.code == KeyCode::Esc {
                             state.close_notices_popup();
                         }
                     }
-                    Event::Key(key) if state.is_spawn_input_open() => match key.code {
-                        KeyCode::Esc => state.close_spawn_input(),
-                        KeyCode::Enter => state.confirm_spawn_input(),
-                        KeyCode::Tab | KeyCode::Down => state.spawn_input_next_field(),
-                        KeyCode::BackTab | KeyCode::Up => state.spawn_input_prev_field(),
-                        KeyCode::Left => state.spawn_input_cycle(-1),
-                        KeyCode::Right => state.spawn_input_cycle(1),
-                        KeyCode::Backspace => state.spawn_input_pop_char(),
-                        KeyCode::Char(c) => state.spawn_input_push_char(c),
-                        _ => {}
-                    },
-                    Event::Key(key) if state.is_remove_confirm_open() => match key.code {
-                        KeyCode::Esc | KeyCode::Char('n') => state.close_remove_confirm(),
-                        KeyCode::Char('c') => state
-                            .confirm_remove(tmux_agent_sidebar::worktree::RemoveMode::WindowOnly),
-                        KeyCode::Enter | KeyCode::Char('y') => state.confirm_remove(
-                            tmux_agent_sidebar::worktree::RemoveMode::WindowAndWorktree,
-                        ),
-                        _ => {}
-                    },
-                    Event::Key(key) if state.is_repo_popup_open() => match key.code {
-                        KeyCode::Esc => state.close_repo_popup(),
-                        KeyCode::Char('j') | KeyCode::Down => {
-                            let count = state.repo_names().len();
-                            let current = state.repo_popup_selected();
-                            if current + 1 < count {
-                                state.set_repo_popup_selected(current + 1);
-                            }
+                    Event::Key(key) if state.is_spawn_input_open() => {
+                        needs_redraw = true;
+                        match key.code {
+                            KeyCode::Esc => state.close_spawn_input(),
+                            KeyCode::Enter => state.confirm_spawn_input(),
+                            KeyCode::Tab | KeyCode::Down => state.spawn_input_next_field(),
+                            KeyCode::BackTab | KeyCode::Up => state.spawn_input_prev_field(),
+                            KeyCode::Left => state.spawn_input_cycle(-1),
+                            KeyCode::Right => state.spawn_input_cycle(1),
+                            KeyCode::Backspace => state.spawn_input_pop_char(),
+                            KeyCode::Char(c) => state.spawn_input_push_char(c),
+                            _ => {}
                         }
-                        KeyCode::Char('k') | KeyCode::Up => {
-                            let current = state.repo_popup_selected();
-                            if current > 0 {
-                                state.set_repo_popup_selected(current - 1);
-                            }
+                    }
+                    Event::Key(key) if state.is_remove_confirm_open() => {
+                        needs_redraw = true;
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Char('n') => state.close_remove_confirm(),
+                            KeyCode::Char('c') => state.confirm_remove(
+                                tmux_agent_sidebar::worktree::RemoveMode::WindowOnly,
+                            ),
+                            KeyCode::Enter | KeyCode::Char('y') => state.confirm_remove(
+                                tmux_agent_sidebar::worktree::RemoveMode::WindowAndWorktree,
+                            ),
+                            _ => {}
                         }
-                        KeyCode::Enter => state.confirm_repo_popup(),
-                        _ => {}
-                    },
-                    Event::Key(key) => match key.code {
-                        KeyCode::Esc => {
-                            if state.focus == Focus::ActivityLog || state.focus == Focus::Filter {
-                                state.focus = Focus::Panes;
-                            }
-                        }
-                        KeyCode::Char('j') | KeyCode::Down => match state.focus {
-                            Focus::Filter => {
-                                state.focus = Focus::Panes;
-                            }
-                            Focus::Panes => {
-                                if state.move_pane_selection(1) {
-                                    state.global.queue_cursor_save();
-                                } else {
-                                    state.focus = Focus::ActivityLog;
+                    }
+                    Event::Key(key) if state.is_repo_popup_open() => {
+                        needs_redraw = true;
+                        match key.code {
+                            KeyCode::Esc => state.close_repo_popup(),
+                            KeyCode::Char('j') | KeyCode::Down => {
+                                let count = state.repo_names().len();
+                                let current = state.repo_popup_selected();
+                                if current + 1 < count {
+                                    state.set_repo_popup_selected(current + 1);
                                 }
                             }
-                            Focus::ActivityLog => state.scroll_bottom(1),
-                        },
-                        KeyCode::Char('k') | KeyCode::Up => match state.focus {
-                            Focus::Filter => {}
-                            Focus::Panes => {
-                                if state.move_pane_selection(-1) {
-                                    state.global.queue_cursor_save();
-                                } else {
-                                    state.focus = Focus::Filter;
+                            KeyCode::Char('k') | KeyCode::Up => {
+                                let current = state.repo_popup_selected();
+                                if current > 0 {
+                                    state.set_repo_popup_selected(current - 1);
                                 }
                             }
-                            Focus::ActivityLog => {
-                                let at_top = match state.bottom_tab {
-                                    tmux_agent_sidebar::state::BottomTab::Activity => {
-                                        state.activity_scroll.offset == 0
-                                    }
-                                    tmux_agent_sidebar::state::BottomTab::GitStatus => {
-                                        state.git_scroll.offset == 0
-                                    }
-                                };
-                                if at_top {
+                            KeyCode::Enter => state.confirm_repo_popup(),
+                            _ => {}
+                        }
+                    }
+                    Event::Key(key) => {
+                        needs_redraw = true;
+                        match key.code {
+                            KeyCode::Esc => {
+                                if state.focus == Focus::ActivityLog || state.focus == Focus::Filter {
                                     state.focus = Focus::Panes;
-                                } else {
-                                    state.scroll_bottom(-1);
                                 }
                             }
-                        },
-                        KeyCode::Char('h') | KeyCode::Left => {
-                            if state.focus == Focus::Filter {
-                                state.global.status_filter = state.global.status_filter.prev();
-                                state.global.save_filter();
-                                state.rebuild_row_targets();
+                            KeyCode::Char('j') | KeyCode::Down => match state.focus {
+                                Focus::Filter => {
+                                    state.focus = Focus::Panes;
+                                }
+                                Focus::Panes => {
+                                    if state.move_pane_selection(1) {
+                                        state.global.queue_cursor_save();
+                                    } else {
+                                        state.focus = Focus::ActivityLog;
+                                    }
+                                }
+                                Focus::ActivityLog => state.scroll_bottom(1),
+                            },
+                            KeyCode::Char('k') | KeyCode::Up => match state.focus {
+                                Focus::Filter => {}
+                                Focus::Panes => {
+                                    if state.move_pane_selection(-1) {
+                                        state.global.queue_cursor_save();
+                                    } else {
+                                        state.focus = Focus::Filter;
+                                    }
+                                }
+                                Focus::ActivityLog => {
+                                    let at_top = match state.bottom_tab {
+                                        tmux_agent_sidebar::state::BottomTab::Activity => {
+                                            state.activity_scroll.offset == 0
+                                        }
+                                        tmux_agent_sidebar::state::BottomTab::GitStatus => {
+                                            state.git_scroll.offset == 0
+                                        }
+                                    };
+                                    if at_top {
+                                        state.focus = Focus::Panes;
+                                    } else {
+                                        state.scroll_bottom(-1);
+                                    }
+                                }
+                            },
+                            KeyCode::Char('h') | KeyCode::Left => {
+                                if state.focus == Focus::Filter {
+                                    state.global.status_filter = state.global.status_filter.prev();
+                                    state.global.save_filter();
+                                    state.rebuild_row_targets();
+                                }
                             }
-                        }
-                        KeyCode::Char('l') | KeyCode::Right => {
-                            if state.focus == Focus::Filter {
+                            KeyCode::Char('l') | KeyCode::Right => {
+                                if state.focus == Focus::Filter {
+                                    state.global.status_filter = state.global.status_filter.next();
+                                    state.global.save_filter();
+                                    state.rebuild_row_targets();
+                                }
+                            }
+                            KeyCode::Char('r') => {
+                                if state.focus == Focus::Filter {
+                                    state.toggle_repo_popup();
+                                }
+                            }
+                            KeyCode::Char('n') => {
+                                if state.focus == Focus::Panes {
+                                    state.open_spawn_input_from_selection();
+                                }
+                            }
+                            KeyCode::Char('x') => {
+                                if state.focus == Focus::Panes {
+                                    state.open_remove_confirm();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if state.focus == Focus::Panes {
+                                    state.activate_selected_pane();
+                                }
+                            }
+                            KeyCode::Tab => {
                                 state.global.status_filter = state.global.status_filter.next();
                                 state.global.save_filter();
                                 state.rebuild_row_targets();
                             }
-                        }
-                        KeyCode::Char('r') => {
-                            if state.focus == Focus::Filter {
-                                state.toggle_repo_popup();
+                            KeyCode::BackTab => {
+                                state.next_bottom_tab();
+                                git_tab_active
+                                    .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
                             }
+                            _ => {}
                         }
-                        KeyCode::Char('n') => {
-                            if state.focus == Focus::Panes {
-                                state.open_spawn_input_from_selection();
-                            }
-                        }
-                        KeyCode::Char('x') => {
-                            if state.focus == Focus::Panes {
-                                state.open_remove_confirm();
-                            }
-                        }
-                        KeyCode::Enter => {
-                            if state.focus == Focus::Panes {
-                                state.activate_selected_pane();
-                            }
-                        }
-                        KeyCode::Tab => {
-                            state.global.status_filter = state.global.status_filter.next();
-                            state.global.save_filter();
-                            state.rebuild_row_targets();
-                        }
-                        KeyCode::BackTab => {
-                            state.next_bottom_tab();
-                            git_tab_active
-                                .store(state.bottom_tab == BottomTab::GitStatus, Ordering::Relaxed);
-                        }
-                        _ => {}
-                    },
+                    }
                     Event::Mouse(mouse) => {
+                        needs_redraw = true;
                         let term_height = terminal.size().map(|s| s.height).unwrap_or(0);
                         let bottom_h = state.bottom_panel_height;
                         match mouse.kind {
@@ -332,6 +342,11 @@ fn run_app(
             }
         }
 
+        if needs_redraw {
+            render_frame(terminal, &mut state)?;
+            needs_redraw = false;
+        }
+
         if last_spinner.elapsed() >= spinner_interval {
             state.spinner_frame = (state.spinner_frame + 1) % SPINNER_PULSE.len();
             last_spinner = std::time::Instant::now();
@@ -344,6 +359,7 @@ fn run_app(
             if state.focused_pane_id != previous_focused_pane_id {
                 refresh_git_for_focused_pane(&mut state);
             }
+            needs_redraw = true;
             if is_window_active {
                 if window_inactive_count >= 2 {
                     state.global.load_from_tmux();
@@ -372,7 +388,32 @@ fn run_app(
         state
             .global
             .flush_pending_cursor_save(std::time::Duration::from_millis(120));
+
+        if needs_redraw {
+            render_frame(terminal, &mut state)?;
+        }
     }
+}
+
+fn render_frame(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    state: &mut tmux_agent_sidebar::state::AppState,
+) -> io::Result<()> {
+    terminal.draw(|frame| ui::draw(frame, state))?;
+
+    // Write OSC 8 hyperlink overlays after frame render.
+    write_hyperlink_overlays(terminal.backend_mut(), &state.layout.hyperlink_overlays)?;
+
+    // Flush any pending OSC 52 clipboard payload (set by notices copy).
+    if let Some(payload) = state.pending_osc52_copy.take() {
+        let seq = tmux_agent_sidebar::clipboard::osc52_sequence(&payload);
+        let backend = terminal.backend_mut();
+        use std::io::Write;
+        let _ = backend.write_all(seq.as_bytes());
+        let _ = backend.flush();
+    }
+
+    Ok(())
 }
 
 fn refresh_git_for_focused_pane(state: &mut AppState) {
