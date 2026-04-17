@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::state::AppState;
-use crate::ui::text::{display_width, pad_to, wrap_text_char};
+use crate::ui::text::{display_width, wrap_text_char};
 
 pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inner: Rect) {
     let theme = &state.theme;
@@ -28,7 +28,11 @@ pub(super) fn draw_activity_content(frame: &mut Frame, state: &mut AppState, inn
 
         let ts_dw = display_width(&entry.timestamp);
         let tool_dw = display_width(&entry.tool);
-        let gap = pad_to(ts_dw + tool_dw, inner_w);
+        // Always keep at least one space between the timestamp and the tool
+        // name — when the two together would otherwise fill the row, a plain
+        // right-align would leave them touching.
+        let gap_len = inner_w.saturating_sub(ts_dw + tool_dw).max(1);
+        let gap = " ".repeat(gap_len);
         let line1 = Line::from(vec![
             Span::styled(
                 entry.timestamp.clone(),

@@ -10,6 +10,11 @@ pub struct ActivityEntry {
 
 impl ActivityEntry {
     pub fn tool_color_index(&self) -> u8 {
+        // MCP tool names arrive as `mcp__<server>__<tool>`; their variable
+        // suffixes would otherwise fall through to the gray fallback.
+        if self.tool.starts_with("mcp__") {
+            return 183; // soft violet
+        }
         match self.tool.as_str() {
             "Edit" | "Write" => 180,         // soft yellow
             "Bash" | "PowerShell" => 114,    // soft green
@@ -278,6 +283,22 @@ mod tests {
             label: "".into(),
         };
         assert_eq!(entry.tool_color_index(), 244);
+
+        // Any `mcp__<server>__<tool>` name gets the MCP category color
+        // instead of falling through to the gray default.
+        let entry = ActivityEntry {
+            timestamp: "10:00".into(),
+            tool: "mcp__context7__query-docs".into(),
+            label: "".into(),
+        };
+        assert_eq!(entry.tool_color_index(), 183);
+
+        let entry = ActivityEntry {
+            timestamp: "10:00".into(),
+            tool: "mcp__chrome-devtools__navigate_page".into(),
+            label: "".into(),
+        };
+        assert_eq!(entry.tool_color_index(), 183);
     }
 
     #[test]
