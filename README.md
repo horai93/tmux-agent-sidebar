@@ -1,19 +1,27 @@
 <h1 align="center">tmux-agent-sidebar</h1>
 
-<p align="center">A tmux sidebar that monitors all AI coding agents (Claude Code, Codex) across all sessions and windows — statuses, prompts, Git info, activity logs, and more in one place.</p>
+<p align="center">A tmux sidebar for keeping Claude Code and Codex panes visible at once. See status, prompts, Git state, activity, and worktrees without switching windows.</p>
 
 <p align="center"><img src="assets/main.png" alt="main" /></p>
 
 ## Features
 
-- **Cross-session monitoring** — Shows all agents from every tmux session and window in one sidebar
-- **Activity log** — Streams each tool invocation (Read, Edit, Bash, etc.) per agent in real time
-- **Task & subagent tracking** — Displays task progress (e.g. `3/7`) and spawned subagents as a parent-child tree
-- **Git integration** — Shows branch name, ahead/behind counts, PR number (`gh`), and per-file diff stats
-- **Worktree-aware grouping** — Groups agents by the same repo, including worktrees, so related panes stay together
-- **Spawn & remove worktrees from the sidebar** — Press `n` (or click `+` next to a repo header) to create a new `git worktree`, open a tmux window in it, and launch an agent in one step. Remove it later with `x`, or click the red `×` next to the branch on any spawn-created row
-- **Pane metadata** — Shows listening localhost ports and execution command info for each pane
-- **Desktop notifications** — Hook-driven OS alerts for task completion/failure and permission prompts
+- **See every agent at a glance**
+  One sidebar for all tmux sessions and windows.
+- **Watch work happen live**
+  Follow prompts, tool calls, and responses as they happen.
+- **Keep track of tasks and subagents**
+  See progress like `3/7` and the subagent tree beneath it.
+- **Stay on top of Git state**
+  Branch name, ahead/behind counts, PR number (`gh`), and diff stats stay visible.
+- **Group related panes together**
+  Worktrees stay with their repo, so context is easier to scan.
+- **Create or clean up worktrees from the sidebar**
+  Press `n` or click `+` to spawn a worktree and agent; press `x` or click `×` to remove it later.
+- **See pane metadata without hunting**
+  Ports and execution command info are shown inline.
+- **Get desktop notifications when something needs attention**
+  Completion, failures, and permission prompts can notify you on the desktop.
 
 ## Agent Pane
 
@@ -133,7 +141,7 @@ The sidebar receives status updates through agent hooks. Add the following hook 
 
 #### 3.1 Claude Code
 
-The repository ships as a Claude Code plugin, so the hooks register themselves.
+The repository ships as a Claude Code plugin, so setup is automatic.
 
 Inside Claude Code, register the marketplace and install the plugin:
 
@@ -142,11 +150,11 @@ Inside Claude Code, register the marketplace and install the plugin:
 /plugin install tmux-agent-sidebar@hiroppy
 ```
 
-Either form wires up the Claude Code hooks. Run `/reload-plugins` (or restart Claude Code) to activate them.
+Either install path wires up the Claude Code hooks. Run `/reload-plugins` (or restart Claude Code) to activate them.
 
 <details>
 <summary>
-If your environment can' use plugin, you will be able to register hooks to your settings.json using below prompt.
+If your environment can't use the plugin, you can register hooks in `settings.json` with the prompt below.
 </summary>
 
 ```
@@ -166,22 +174,22 @@ Run ~/.tmux/plugins/tmux-agent-sidebar/target/release/tmux-agent-sidebar setup c
 
 | Key | Action |
 |---|---|
-| `prefix + e` | Toggle sidebar (default, customizable) |
-| `prefix + E` | Toggle sidebar in all windows (default, customizable) |
-| `j` / `Down` | Move selection down (filter → agents → bottom panel) |
+| `prefix + e` | Toggle sidebar |
+| `prefix + E` | Toggle sidebar in all windows |
+| `j` / `Down` | Move selection down |
 | `k` / `Up` | Move selection up |
-| `h` / `Left` | Previous status filter when the filter bar is focused |
-| `l` / `Right` | Next status filter when the filter bar is focused |
-| `r` | Open repo filter popup (filter bar only) |
-| `n` | Spawn a new worktree + agent for the selected row's repo |
-| `x` | Remove the selected spawn-created pane (opens the close modal) |
-| `Enter` | Jump to the selected agent's pane / confirm the repo popup |
-| `Tab` | Cycle status filter (All → Running → Waiting → Idle → Error) |
-| `Shift+Tab` | Switch bottom panel tab (Activity / Git) |
-| `Esc` | Return focus to the agents panel / close the repo popup |
-| Mouse click `+` | Open the spawn modal for that repo (right edge of each repo header) |
-| Mouse click `×` | Open the close-pane modal for that spawn-created worktree (red `×` next to the branch) |
-| Mouse click | Jump to an agent's pane / filter by status / open the repo popup |
+| `h` / `Left` | Previous status filter |
+| `l` / `Right` | Next status filter |
+| `r` | Open repo filter popup |
+| `n` | Spawn a new worktree + agent |
+| `x` | Remove the selected spawn-created pane |
+| `Enter` | Jump to the selected pane or confirm the repo popup |
+| `Tab` | Cycle status filter |
+| `Shift+Tab` | Switch bottom panel tab |
+| `Esc` | Return focus or close the popup |
+| Mouse click `+` | Open the spawn modal for that repo |
+| Mouse click `×` | Open the close-pane modal for that worktree |
+| Mouse click | Jump to a pane, filter by status, or open the repo popup |
 
 ### Spawn worktree modal
 
@@ -205,7 +213,7 @@ Opened with `x` on a spawn-created pane.
 | `c` | Close the tmux window only, keep the worktree and branch on disk |
 | `n` / `Esc` | Cancel |
 
-Branches are force-deleted because the sidebar auto-generates them under the `agent/` prefix for short-lived explorations; squash/rebase-merged work would otherwise be refused by the non-forced `git branch -d` check. Recover via `git reflog` if needed.
+Branches are force-deleted because the sidebar auto-generates them under the `agent/` prefix for short-lived explorations. A normal `git branch -d` can refuse squash- or rebase-merged work, so the close action uses `git branch -D` instead. Recover via `git reflog` if needed.
 
 
 ## Feature Support by Agent
@@ -305,7 +313,7 @@ Supported events:
 
 - `stop` — assistant finished responding (`Stop` hook; Claude Code and Codex)
 - `notification` — permission prompt or other attention request (`Notification` hook; Claude only)
-- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook; Claude only). Off by default — opt in via `@sidebar_notifications_events`.
+- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook; Claude only)
 - `stop_failure` — assistant ended with an error (`StopFailure` hook; Claude only)
 - `permission_denied` — permission explicitly denied (`PermissionDenied` hook; Claude only)
 
