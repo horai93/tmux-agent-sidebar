@@ -28,6 +28,8 @@ const STRATEGY_TABLE: &[(&str, LabelStrategy)] = &[
     ("NotebookEdit", LabelStrategy::FilePath("notebook_path")),
     ("Bash", LabelStrategy::Field("command")),
     ("PowerShell", LabelStrategy::Field("command")),
+    ("Monitor", LabelStrategy::Field("command")),
+    ("PushNotification", LabelStrategy::Field("message")),
     ("Glob", LabelStrategy::Field("pattern")),
     ("Grep", LabelStrategy::Field("pattern")),
     ("WebFetch", LabelStrategy::UrlStrip("url")),
@@ -560,6 +562,24 @@ mod tests {
         assert_eq!(
             extract_tool_label("PowerShell", &json!({}), &json!(null)),
             ""
+        );
+    }
+
+    #[test]
+    fn label_monitor_extracts_command() {
+        let input = json!({"command": "tail -f /var/log/server.log"});
+        assert_eq!(
+            extract_tool_label("Monitor", &input, &json!(null)),
+            "tail -f /var/log/server.log"
+        );
+    }
+
+    #[test]
+    fn label_push_notification_extracts_message() {
+        let input = json!({"message": "Deploy finished"});
+        assert_eq!(
+            extract_tool_label("PushNotification", &input, &json!(null)),
+            "Deploy finished"
         );
     }
 

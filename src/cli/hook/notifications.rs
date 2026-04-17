@@ -104,6 +104,22 @@ pub(super) fn stop_failure_body(error: &str) -> String {
     }
 }
 
+pub(super) fn session_end_fingerprint(end_reason: &str) -> String {
+    if end_reason.is_empty() {
+        "session-ended".to_string()
+    } else {
+        format!("session-ended:{end_reason}")
+    }
+}
+
+pub(super) fn session_end_body(end_reason: &str) -> String {
+    if end_reason.is_empty() {
+        "Session ended".to_string()
+    } else {
+        format!("Session ended: {end_reason}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +147,14 @@ mod tests {
         assert_eq!(stop_failure_fingerprint(""), "task-failed");
         assert_eq!(stop_failure_body("boom"), "Task failed: boom");
         assert_eq!(stop_failure_body(""), "Task failed");
+    }
+
+    #[test]
+    fn notification_session_end_helpers_choose_expected_values() {
+        assert_eq!(session_end_fingerprint("logout"), "session-ended:logout");
+        assert_eq!(session_end_fingerprint(""), "session-ended");
+        assert_eq!(session_end_body("logout"), "Session ended: logout");
+        assert_eq!(session_end_body(""), "Session ended");
     }
 
     #[test]

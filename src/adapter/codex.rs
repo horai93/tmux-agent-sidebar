@@ -49,6 +49,7 @@ impl EventAdapter for CodexAdapter {
                 agent: CODEX_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
+                source: json_str(input, "source").into(),
                 worktree: None,
                 agent_id: None,
                 session_id: None,
@@ -114,6 +115,7 @@ mod tests {
                 agent: CODEX_AGENT.into(),
                 cwd: "/home/user".into(),
                 permission_mode: "".into(),
+                source: "".into(),
                 worktree: None,
                 agent_id: None,
                 session_id: None,
@@ -272,6 +274,17 @@ mod tests {
     }
 
     #[test]
+    fn session_start_captures_source() {
+        let event = CodexAdapter
+            .parse("session-start", &json!({"cwd": "/tmp", "source": "resume"}))
+            .unwrap();
+        match event {
+            AgentEvent::SessionStart { source, .. } => assert_eq!(source, "resume"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
     fn task_created_not_supported() {
         assert!(CodexAdapter.parse("task-created", &json!({})).is_none());
     }
@@ -306,6 +319,7 @@ mod tests {
                 agent: "codex".into(),
                 cwd: "".into(),
                 permission_mode: "".into(),
+                source: "".into(),
                 worktree: None,
                 agent_id: None,
                 session_id: None,

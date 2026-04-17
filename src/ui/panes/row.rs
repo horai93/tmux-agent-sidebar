@@ -126,6 +126,7 @@ fn status_row(
             PermissionMode::DontAsk => theme.badge_auto,
             PermissionMode::Plan => theme.badge_plan,
             PermissionMode::AcceptEdits => theme.badge_auto,
+            PermissionMode::Defer => theme.badge_auto,
             PermissionMode::Default => theme.text_muted,
         };
         left_spans.push(Span::styled(
@@ -583,6 +584,31 @@ mod tests {
 
         let status = line_text(&lines[0]);
         assert!(status.contains(" codex auto"));
+    }
+
+    #[test]
+    fn render_pane_lines_shows_defer_badge() {
+        let theme = ColorTheme::default();
+        let pane = pane(PermissionMode::Defer, PaneStatus::Running, "");
+        let lines = render_pane_lines_with_ports(
+            &pane,
+            &PaneGitInfo::default(),
+            None,
+            None,
+            false,
+            false,
+            40,
+            &StatusIcons::default(),
+            &theme,
+            0,
+            0,
+        );
+
+        let status = line_text(&lines[0]);
+        assert!(
+            status.contains(" codex defer"),
+            "defer permission mode should render its badge, got: {status}"
+        );
     }
 
     #[test]

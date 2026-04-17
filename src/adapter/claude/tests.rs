@@ -17,6 +17,7 @@ fn session_start() {
             agent: "claude".into(),
             cwd: "/home/user".into(),
             permission_mode: "default".into(),
+            source: "".into(),
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -25,11 +26,42 @@ fn session_start() {
 }
 
 #[test]
+fn session_start_captures_source() {
+    let adapter = ClaudeAdapter;
+    let input = json!({
+        "cwd": "/home/user",
+        "permission_mode": "default",
+        "source": "resume"
+    });
+    let event = adapter.parse("session-start", &input).unwrap();
+    match event {
+        AgentEvent::SessionStart { source, .. } => assert_eq!(source, "resume"),
+        _ => panic!("wrong variant"),
+    }
+}
+
+#[test]
 fn session_end() {
     let adapter = ClaudeAdapter;
     assert_eq!(
         adapter.parse("session-end", &json!({})).unwrap(),
-        AgentEvent::SessionEnd
+        AgentEvent::SessionEnd {
+            end_reason: "".into()
+        }
+    );
+}
+
+#[test]
+fn session_end_captures_reason() {
+    let adapter = ClaudeAdapter;
+    let event = adapter
+        .parse("session-end", &json!({"end_reason": "logout"}))
+        .unwrap();
+    assert_eq!(
+        event,
+        AgentEvent::SessionEnd {
+            end_reason: "logout".into()
+        }
     );
 }
 
@@ -329,6 +361,25 @@ fn teammate_idle() {
         AgentEvent::TeammateIdle {
             teammate_name: "reviewer".into(),
             team_name: "dev".into(),
+            idle_reason: "".into(),
+        }
+    );
+}
+
+#[test]
+fn teammate_idle_with_reason() {
+    let adapter = ClaudeAdapter;
+    let input = json!({
+        "teammate_name": "reviewer",
+        "team_name": "dev",
+        "idle_reason": "tokens_exhausted"
+    });
+    assert_eq!(
+        adapter.parse("teammate-idle", &input).unwrap(),
+        AgentEvent::TeammateIdle {
+            teammate_name: "reviewer".into(),
+            team_name: "dev".into(),
+            idle_reason: "tokens_exhausted".into(),
         }
     );
 }
@@ -386,6 +437,7 @@ fn teammate_idle_empty_fields() {
         AgentEvent::TeammateIdle {
             teammate_name: "".into(),
             team_name: "".into(),
+            idle_reason: "".into(),
         }
     );
 }
@@ -468,6 +520,7 @@ fn teammate_idle_full_upstream_payload() {
         AgentEvent::TeammateIdle {
             teammate_name: "code-reviewer".into(),
             team_name: "review-team".into(),
+            idle_reason: "".into(),
         }
     );
 }
@@ -799,6 +852,7 @@ fn session_start_missing_fields_default_to_empty() {
             agent: "claude".into(),
             cwd: "".into(),
             permission_mode: "".into(),
+            source: "".into(),
             worktree: None,
             agent_id: None,
             session_id: None,

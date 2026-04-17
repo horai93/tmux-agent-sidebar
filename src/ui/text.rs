@@ -40,9 +40,16 @@ pub fn wait_reason_label(reason: &str) -> String {
         "elicitation_dialog" => "waiting for selection".into(),
         "rate_limit" => "rate limit".into(),
         "permission_denied" => "permission denied".into(),
+        "session_resumed" => "resumed".into(),
+        "session_resumed_compact" => "resumed (compact)".into(),
         _ => {
             if reason.is_empty() {
                 String::new()
+            } else if let Some(rest) = reason.strip_prefix("teammate_idle:") {
+                match rest.split_once(':') {
+                    Some((name, why)) if !why.is_empty() => format!("{name} idle ({why})"),
+                    _ => format!("{rest} idle"),
+                }
             } else {
                 reason.to_string()
             }
@@ -373,6 +380,32 @@ mod tests {
     #[test]
     fn wait_reason_permission_denied() {
         assert_eq!(wait_reason_label("permission_denied"), "permission denied");
+    }
+
+    // ─── wait_reason_label: session resume ─────────────────────────
+
+    #[test]
+    fn wait_reason_session_resumed() {
+        assert_eq!(wait_reason_label("session_resumed"), "resumed");
+        assert_eq!(
+            wait_reason_label("session_resumed_compact"),
+            "resumed (compact)"
+        );
+    }
+
+    // ─── wait_reason_label: teammate_idle ──────────────────────────
+
+    #[test]
+    fn wait_reason_teammate_idle_without_reason() {
+        assert_eq!(wait_reason_label("teammate_idle:alice"), "alice idle");
+    }
+
+    #[test]
+    fn wait_reason_teammate_idle_with_reason() {
+        assert_eq!(
+            wait_reason_label("teammate_idle:alice:tokens_exhausted"),
+            "alice idle (tokens_exhausted)"
+        );
     }
 
     // ─── branch_label ──────────────────────────────────────────────

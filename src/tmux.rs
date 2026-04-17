@@ -98,6 +98,7 @@ pub enum PermissionMode {
     Auto,
     DontAsk,
     BypassPermissions,
+    Defer,
 }
 
 impl PermissionMode {
@@ -110,6 +111,7 @@ impl PermissionMode {
             "auto" => Self::Auto,
             "dontAsk" => Self::DontAsk,
             "bypassPermissions" => Self::BypassPermissions,
+            "defer" => Self::Defer,
             _ => Self::Default,
         }
     }
@@ -122,6 +124,7 @@ impl PermissionMode {
             Self::Auto => "auto",
             Self::DontAsk => "dontAsk",
             Self::BypassPermissions => "!",
+            Self::Defer => "defer",
         }
     }
 }
@@ -1047,6 +1050,7 @@ mod tests {
             PermissionMode::from_label("bypassPermissions"),
             PermissionMode::BypassPermissions
         );
+        assert_eq!(PermissionMode::from_label("defer"), PermissionMode::Defer);
         assert_eq!(PermissionMode::from_label(""), PermissionMode::Default);
         assert_eq!(
             PermissionMode::from_label("unknown"),
@@ -1062,6 +1066,7 @@ mod tests {
         assert_eq!(PermissionMode::Auto.badge(), "auto");
         assert_eq!(PermissionMode::DontAsk.badge(), "dontAsk");
         assert_eq!(PermissionMode::BypassPermissions.badge(), "!");
+        assert_eq!(PermissionMode::Defer.badge(), "defer");
     }
 
     #[test]

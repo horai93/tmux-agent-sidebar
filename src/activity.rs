@@ -16,17 +16,17 @@ impl ActivityEntry {
             return 183; // soft violet
         }
         match self.tool.as_str() {
-            "Edit" | "Write" => 180,         // soft yellow
-            "Bash" | "PowerShell" => 114,    // soft green
-            "Read" | "Glob" | "Grep" => 110, // soft blue
-            "Agent" => 181,                  // soft pink
-            "WebFetch" | "WebSearch" => 117, // soft cyan
-            "Skill" => 218,                  // soft magenta
+            "Edit" | "Write" => 180,                  // soft yellow
+            "Bash" | "PowerShell" | "Monitor" => 114, // soft green (Bash-permission category)
+            "Read" | "Glob" | "Grep" => 110,          // soft blue
+            "Agent" => 181,                           // soft pink
+            "WebFetch" | "WebSearch" => 117,          // soft cyan
+            "Skill" => 218,                           // soft magenta
             "TaskCreate" | "TaskUpdate" | "TaskGet" | "TaskList" | "TaskStop" | "TaskOutput" => 223, // soft gold
             "SendMessage" | "TeamCreate" | "TeamDelete" => 182, // soft lavender
             "LSP" => 146,                                       // soft teal
             "NotebookEdit" => 180,                              // soft yellow (like Edit)
-            "AskUserQuestion" => 216,                           // soft orange
+            "AskUserQuestion" | "PushNotification" => 216,      // soft orange (attention)
             "CronCreate" | "CronDelete" | "CronList" | "RemoteTrigger" => 151, // soft mint
             "EnterPlanMode" | "ExitPlanMode" => 189,            // soft periwinkle
             "EnterWorktree" | "ExitWorktree" => 179,            // soft bronze
@@ -276,6 +276,20 @@ mod tests {
             label: "Get-Process".into(),
         };
         assert_eq!(entry.tool_color_index(), 114);
+
+        let entry = ActivityEntry {
+            timestamp: "10:00".into(),
+            tool: "Monitor".into(),
+            label: "tail -f server.log".into(),
+        };
+        assert_eq!(entry.tool_color_index(), 114);
+
+        let entry = ActivityEntry {
+            timestamp: "10:00".into(),
+            tool: "PushNotification".into(),
+            label: "Deploy complete".into(),
+        };
+        assert_eq!(entry.tool_color_index(), 216);
 
         let entry = ActivityEntry {
             timestamp: "10:00".into(),

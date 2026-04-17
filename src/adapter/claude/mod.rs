@@ -146,11 +146,14 @@ impl EventAdapter for ClaudeAdapter {
                 agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
+                source: json_str(input, "source").into(),
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
                 session_id: optional_str(input, "session_id"),
             }),
-            "session-end" => Some(AgentEvent::SessionEnd),
+            "session-end" => Some(AgentEvent::SessionEnd {
+                end_reason: json_str(input, "end_reason").into(),
+            }),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
                 agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
@@ -268,6 +271,7 @@ impl EventAdapter for ClaudeAdapter {
             "teammate-idle" => Some(AgentEvent::TeammateIdle {
                 teammate_name: json_str(input, "teammate_name").into(),
                 team_name: json_str(input, "team_name").into(),
+                idle_reason: json_str(input, "idle_reason").into(),
             }),
             "worktree-create" => Some(AgentEvent::WorktreeCreate),
             "worktree-remove" => Some(AgentEvent::WorktreeRemove {

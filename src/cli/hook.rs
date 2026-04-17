@@ -45,14 +45,19 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             agent,
             cwd,
             permission_mode,
+            source,
             worktree,
             session_id,
             ..
         } => handlers::on_session_start(
             pane,
             &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+            &source,
         ),
-        AgentEvent::SessionEnd => handlers::on_session_end(pane),
+        AgentEvent::SessionEnd { end_reason } => {
+            let notifications = notification_settings();
+            handlers::on_session_end(pane, agent_name, &end_reason, &notifications)
+        }
         AgentEvent::UserPromptSubmit {
             agent,
             cwd,
@@ -166,9 +171,11 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             let notifications = notification_settings();
             handlers::on_task_completed(pane, agent_name, &task_id, &task_subject, &notifications)
         }
-        AgentEvent::TeammateIdle { teammate_name, .. } => {
-            handlers::on_teammate_idle(pane, &teammate_name)
-        }
+        AgentEvent::TeammateIdle {
+            teammate_name,
+            idle_reason,
+            ..
+        } => handlers::on_teammate_idle(pane, &teammate_name, &idle_reason),
         AgentEvent::WorktreeCreate => 0,
         AgentEvent::WorktreeRemove { .. } => handlers::on_worktree_remove(pane),
     }

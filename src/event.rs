@@ -24,11 +24,14 @@ pub enum AgentEvent {
         agent: String,
         cwd: String,
         permission_mode: String,
+        source: String,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,
     },
-    SessionEnd,
+    SessionEnd {
+        end_reason: String,
+    },
     UserPromptSubmit {
         agent: String,
         cwd: String,
@@ -110,6 +113,7 @@ pub enum AgentEvent {
     TeammateIdle {
         teammate_name: String,
         team_name: String,
+        idle_reason: String,
     },
     WorktreeCreate,
     WorktreeRemove {
@@ -122,7 +126,7 @@ impl AgentEvent {
     pub fn kind(&self) -> AgentEventKind {
         match self {
             Self::SessionStart { .. } => AgentEventKind::SessionStart,
-            Self::SessionEnd => AgentEventKind::SessionEnd,
+            Self::SessionEnd { .. } => AgentEventKind::SessionEnd,
             Self::UserPromptSubmit { .. } => AgentEventKind::UserPromptSubmit,
             Self::Notification { .. } => AgentEventKind::Notification,
             Self::Stop { .. } => AgentEventKind::Stop,
@@ -151,6 +155,7 @@ mod tests {
             agent: "claude".into(),
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
+            source: String::new(),
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -178,6 +183,7 @@ mod tests {
             agent: "claude".into(),
             cwd: "/tmp/wt".into(),
             permission_mode: "default".into(),
+            source: String::new(),
             worktree: Some(wt.clone()),
             agent_id: Some("abc-123".into()),
             session_id: None,

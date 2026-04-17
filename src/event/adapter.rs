@@ -27,7 +27,12 @@ mod tests {
         let adapter = resolve_adapter("claude");
         assert!(adapter.is_some());
         let event = adapter.unwrap().parse("session-end", &json!({}));
-        assert_eq!(event, Some(AgentEvent::SessionEnd));
+        assert_eq!(
+            event,
+            Some(AgentEvent::SessionEnd {
+                end_reason: "".into()
+            })
+        );
     }
 
     #[test]
@@ -158,7 +163,9 @@ mod tests {
         let claude = resolve_adapter("claude").unwrap();
         assert_eq!(
             claude.parse("session-end", &json!({})),
-            Some(AgentEvent::SessionEnd),
+            Some(AgentEvent::SessionEnd {
+                end_reason: "".into()
+            }),
         );
         assert!(
             resolve_adapter("codex")
@@ -262,15 +269,21 @@ mod tests {
     #[test]
     fn claude_teammate_idle_round_trip() {
         let adapter = resolve_adapter("claude").unwrap();
-        let input = json!({"teammate_name": "reviewer", "team_name": "dev"});
+        let input = json!({
+            "teammate_name": "reviewer",
+            "team_name": "dev",
+            "idle_reason": "tokens_exhausted"
+        });
         let event = adapter.parse("teammate-idle", &input).unwrap();
         match event {
             AgentEvent::TeammateIdle {
                 teammate_name,
                 team_name,
+                idle_reason,
             } => {
                 assert_eq!(teammate_name, "reviewer");
                 assert_eq!(team_name, "dev");
+                assert_eq!(idle_reason, "tokens_exhausted");
             }
             other => panic!("expected TeammateIdle, got {:?}", other),
         }
