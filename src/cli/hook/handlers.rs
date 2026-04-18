@@ -781,7 +781,15 @@ mod tests {
         let pane = "%END_LOGOUT";
         // Seed a run id so the fingerprint is run-scoped.
         tmux::test_mock::set(pane, "@pane_notification_run_id", "1700000000000");
-        on_session_end(pane, "claude", "logout", &notifications_enabled_all());
+        // Agent name is surfaced in the desktop notification title; using an
+        // obvious test marker makes it trivial to spot when a local `cargo
+        // test` run happens to actually fire osascript.
+        on_session_end(
+            pane,
+            "cargo-test: on_session_end_logout",
+            "logout",
+            &notifications_enabled_all(),
+        );
         // If `send_desktop_notification` succeeds (local dev with notify-send
         // / osascript available), the stamp is written; if it fails (headless
         // CI), the stamp stays unset but we at least verified the gate let
@@ -804,7 +812,7 @@ mod tests {
         tmux::test_mock::set(pane, "@pane_notification_run_id", "1700000000000");
         on_session_end(
             pane,
-            "claude",
+            "cargo-test: on_session_end_bypass_disabled",
             "bypass_permissions_disabled",
             &notifications_enabled_all(),
         );
