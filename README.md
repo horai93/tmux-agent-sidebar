@@ -69,6 +69,55 @@
   </tr>
 </table>
 
+## Desktop Notifications
+
+Desktop notifications are enabled by default.
+
+Supported events:
+
+- `stop` — assistant finished responding (`Stop` hook; Claude Code and Codex)
+- `notification` — permission prompt or other attention request (`Notification` hook; Claude only)
+- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook; Claude only)
+- `stop_failure` — assistant ended with an error (`StopFailure` hook; Claude only)
+- `permission_denied` — permission explicitly denied (`PermissionDenied` hook; Claude only)
+
+Restrict which events fire notifications with `@sidebar_notifications_events` (comma-separated event names; `all` fires every event, unset = every event except `task_completed`):
+
+```tmux
+set -g @sidebar_notifications_events "stop,notification"                  # drop error notifications
+set -g @sidebar_notifications_events "stop,notification,task_completed"   # enable subagent notifications
+set -g @sidebar_notifications_events all                                  # explicit "fire everything"
+```
+
+Setting an empty value disables every event without touching the master `@sidebar_notifications` switch.
+
+Delivery depends on the platform:
+
+- macOS uses `osascript`
+- Linux uses `notify-send`
+- Windows is not supported yet
+
+If the required notification command is missing, the feature quietly disables itself.
+
+Notification layout:
+
+```
+┌─────────────────────────────────────────────┐
+│  repo (branch) / agent          ← title     │
+│  <event body>                   ← body      │
+└─────────────────────────────────────────────┘
+```
+
+Title falls back to `repo / agent` when the branch is unknown, and to `agent` alone when there is no repo. Body per event:
+
+| Event              | Body                                          | Fallback               |
+|--------------------|-----------------------------------------------|------------------------|
+| `stop`             | assistant's last message (truncated to ~240c) | `Task completed`       |
+| `notification`     | wait reason                                   | `Permission required`  |
+| `task_completed`   | `Task completed: {task_subject}`              | `Task completed`       |
+| `stop_failure`     | `Task failed: {error}`                        | `Task failed`          |
+| `permission_denied` | (no payload)                                 | `Permission required`  |
+
 ## Requirements
 
 - tmux 3.0+
@@ -234,8 +283,6 @@ Branches are force-deleted because the sidebar auto-generates them under the `ag
 
 - **Waiting status (Claude Code)** — After you approve a permission prompt, the status stays `waiting` until the next hook event fires. This is a limitation of the Claude Code hook system.
 - **Codex hook coverage** — Codex emits `SessionStart`, `UserPromptSubmit`, `Stop`, and `PostToolUse`. `PostToolUse` is limited to the `Bash` tool (Codex's schema types `tool_input` as `{ command: string }`), so the Codex activity log shows only Bash commands. Waiting status, task progress, subagent display, and worktree tracking remain unavailable.
-- **Desktop notifications** — macOS requires `osascript`; Linux requires `notify-send`. If those commands are missing, notifications stay silent even when `@sidebar_notifications` is enabled. `Stop` notifications fire for both Claude Code and Codex; `Notification`, `TaskCompleted`, `StopFailure`, and `PermissionDenied` fire only for Claude Code (Codex does not emit those hooks).
-
 ## Customization
 
 Most options can be set **before** loading the plugin in your `tmux.conf`:
@@ -294,61 +341,6 @@ set -g @sidebar_icon_unknown ·           # unknown status icon
 
 run-shell ~/.tmux/plugins/tmux-agent-sidebar/tmux-agent-sidebar.tmux
 ```
-
-## Desktop Notifications
-
-Desktop notifications are enabled by default.
-
-Enable them with tmux global options:
-
-```tmux
-set -g @sidebar_notifications on
-```
-
-Supported events:
-
-- `stop` — assistant finished responding (`Stop` hook; Claude Code and Codex)
-- `notification` — permission prompt or other attention request (`Notification` hook; Claude only)
-- `task_completed` — subagent / Task tool completion (`TaskCompleted` hook; Claude only)
-- `stop_failure` — assistant ended with an error (`StopFailure` hook; Claude only)
-- `permission_denied` — permission explicitly denied (`PermissionDenied` hook; Claude only)
-
-Restrict which events fire notifications with `@sidebar_notifications_events` (comma-separated event names; `all` fires every event, unset = every event except `task_completed`):
-
-```tmux
-set -g @sidebar_notifications_events "stop,notification"                  # drop error notifications
-set -g @sidebar_notifications_events "stop,notification,task_completed"   # enable subagent notifications
-set -g @sidebar_notifications_events all                                  # explicit "fire everything"
-```
-
-Setting an empty value disables every event without touching the master `@sidebar_notifications` switch.
-
-Delivery depends on the platform:
-
-- macOS uses `osascript`
-- Linux uses `notify-send`
-- Windows is not supported yet
-
-If the required notification command is missing, the feature quietly disables itself.
-
-Notification layout:
-
-```
-┌─────────────────────────────────────────────┐
-│  repo (branch) / agent          ← title     │
-│  <event body>                   ← body      │
-└─────────────────────────────────────────────┘
-```
-
-Title falls back to `repo / agent` when the branch is unknown, and to `agent` alone when there is no repo. Body per event:
-
-| Event              | Body                                          | Fallback               |
-|--------------------|-----------------------------------------------|------------------------|
-| `stop`             | assistant's last message (truncated to ~240c) | `Task completed`       |
-| `notification`     | wait reason                                   | `Permission required`  |
-| `task_completed`   | `Task completed: {task_subject}`              | `Task completed`       |
-| `stop_failure`     | `Task failed: {error}`                        | `Task failed`          |
-| `permission_denied` | (no payload)                                 | `Permission required`  |
 
 ## Accessing Agent Status from Scripts
 
