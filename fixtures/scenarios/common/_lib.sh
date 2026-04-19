@@ -124,11 +124,14 @@ build_layout() {
     export MAIN_PANE
     MAIN_PANE=$(tmux split-window -h -t "$SIDEBAR_PANE" -p 67 -c "$ROOT" -P -F '#{pane_id}')
 
-    # Main pane: Claude on `main` investigating a CI flake. Non-worktree
-    # branch at the top of the list.
+    # Main pane: Claude on the project's own checkout, investigating a
+    # CI flake. Non-worktree branch at the top of the list — we omit
+    # `branch=` so the sidebar derives the branch from `$ROOT` via git
+    # (setting @pane_worktree_branch forces is_worktree=true, which
+    # would render the row as `+ main`). Hero capture must be run from
+    # a main checkout for the branch label to read "main".
     _seed_pane "$MAIN_PANE" \
         agent=claude status=running \
-        branch=main \
         prompt="investigate the nightly CI flake in the fixtures runner" \
         started_s=423
     tmux set-option -t "$MAIN_PANE" -p @pane_subagents \
