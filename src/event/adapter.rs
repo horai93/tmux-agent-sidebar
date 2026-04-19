@@ -43,6 +43,12 @@ mod tests {
     }
 
     #[test]
+    fn resolve_pi() {
+        let adapter = resolve_adapter("pi");
+        assert!(adapter.is_some());
+    }
+
+    #[test]
     fn resolve_unknown_returns_none() {
         assert!(resolve_adapter("gemini").is_none());
         assert!(resolve_adapter("").is_none());
@@ -70,6 +76,18 @@ mod tests {
             .unwrap();
         match event {
             AgentEvent::UserPromptSubmit { agent, .. } => assert_eq!(agent, "codex"),
+            other => panic!("expected UserPromptSubmit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn pi_adapter_sets_agent_pi() {
+        let adapter = resolve_adapter("pi").unwrap();
+        let event = adapter
+            .parse("user-prompt-submit", &json!({"prompt": "hi"}))
+            .unwrap();
+        match event {
+            AgentEvent::UserPromptSubmit { agent, .. } => assert_eq!(agent, "pi"),
             other => panic!("expected UserPromptSubmit, got {:?}", other),
         }
     }
@@ -152,18 +170,25 @@ mod tests {
     }
 
     #[test]
-    fn both_adapters_handle_session_start() {
-        for agent_name in &["claude", "codex"] {
+    fn all_supported_adapters_handle_session_start() {
+        for agent_name in &["claude", "codex", "pi"] {
             let adapter = resolve_adapter(agent_name).unwrap();
             assert!(
                 adapter.parse("session-start", &json!({})).is_some(),
                 "{agent_name} should handle session-start"
             );
         }
-        // Codex does not fire SessionEnd, so only Claude handles it.
+        // Codex does not fire SessionEnd, so only Claude and pi handle it.
         let claude = resolve_adapter("claude").unwrap();
         assert_eq!(
             claude.parse("session-end", &json!({})),
+            Some(AgentEvent::SessionEnd {
+                end_reason: "".into()
+            }),
+        );
+        let pi = resolve_adapter("pi").unwrap();
+        assert_eq!(
+            pi.parse("session-end", &json!({})),
             Some(AgentEvent::SessionEnd {
                 end_reason: "".into()
             }),
